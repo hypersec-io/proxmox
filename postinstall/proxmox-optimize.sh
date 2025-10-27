@@ -155,7 +155,7 @@ fi
 #############################################
 echo -e "\n${YELLOW}[3/7] Configuring kernel parameters...${NC}"
 
-cat > /etc/sysctl.d/99-proxmox-optimize.conf << 'EOF'
+cat > /etc/sysctl.d/98-proxmox-optimize.conf << 'EOF'
 # Proxmox VM/Container Configuration
 
 # Memory Management
