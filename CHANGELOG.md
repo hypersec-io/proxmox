@@ -101,45 +101,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Safety notes and warnings
 - Backup location documentation
 
-## [1.0.0] - 2024-06-15 (Hypothetical)
+## Previous Versions
 
-### Added
-- Initial alpha version for Proxmox VE 8.x
-- Basic optimization scripts
+### Ported
+- Ported from HyperSec Proxmox on prem core scrips
+- Upgraded from Proxmox 8.x and 7.x
 - Repository configuration
-
----
-
-## Version History Summary
-
-| Version | Release Date | Description |
-|---------|--------------|-------------|
-| 2.1.0   | 2025-10-10   | Network optimization, thermal management, documentation |
-| 2.0.0   | 2024-09-01   | Complete rewrite for Proxmox 9/Debian 13 |
-| 1.0.0   | 2024-06-15   | Initial release |
-
----
-
-## Upgrade Notes
-
-### Upgrading from 2.0.x to 2.1.0
-- BREAKING: Version numbers removed from script headers
-- NEW: Network optimization script available (`proxmox-network.sh`)
-  - Supports auto-detection: `sudo ./proxmox-network.sh auto`
-  - Or manual tier: `sudo ./proxmox-network.sh 10gbe`
-- Thermal monitoring now integrated with power management
-- Run `proxmox-power-management.sh` to get thermal management features
-- Run `proxmox-network.sh auto` for automatic network optimization (recommended)
-- Previous thermal-check script (if exists) will be overwritten
-
-### Upgrading from 1.x to 2.0.0
-- Complete rewrite - treat as new installation
-- Backup all custom configurations
-- Review and re-apply scripts in order
-- Kernel parameters may have changed
-- GRUB update and reboot required
-
----
 
 ## Contributing
 
