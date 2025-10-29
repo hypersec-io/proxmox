@@ -71,11 +71,11 @@ Before contributing, ensure you have:
 ```bash
 # Fork the repository on GitHub
 # Then clone your fork
-git clone https://github.com/YOUR_USERNAME/proxmox-postinstall.git
-cd proxmox-postinstall/postinstall
+git clone https://github.com/YOUR_USERNAME/proxmox.git
+cd proxmox/postinstall
 
 # Add upstream remote
-git remote add upstream https://github.com/ORIGINAL_OWNER/proxmox-postinstall.git
+git remote add upstream https://github.com/hypersec-io/proxmox.git
 ```
 
 ---

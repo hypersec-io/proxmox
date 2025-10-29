@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2025-10-30
+
+### Added
+
+- Chrony (NTP) time synchronization configuration in proxmox-optimize.sh
+- Installation of 99-proxmox-cluster.conf for improved cluster time stability
+- Step counter updated from 7 to 8 steps in optimization script
+
+### Changed
+
+- Updated recommended script execution order in README.md
+  - New order: repo → optimize → zfs → power (optional) → network (optional)
+- Changed installation method to prefer download/unzip over git clone
+- Updated all repository references to hypersec-io/proxmox
+
+### Fixed
+
+- README.md now uses main branch zip for "latest" downloads instead of version-specific releases
+
+## [2.1.1] - 2025-10-27
+
+### Fixed
+- Corrected sysctl.d file load order to ensure network settings (99-proxmox-network.conf) properly override base optimize settings (98-proxmox-optimize.conf)
+
 ## [2.1.0] - 2025-10-10
 
 ### Added

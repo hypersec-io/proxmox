@@ -55,10 +55,15 @@ A collection of idempotent scripts for post-installation configuration of Proxmo
 
 ### Installation
 
+#### Method 1: Download Latest (Recommended)
+
 ```bash
-# Download the scripts
-git clone https://github.com/yourusername/proxmox-postinstall.git
-cd proxmox-postinstall/postinstall
+# Download the latest version from main branch
+wget https://github.com/hypersec-io/proxmox/archive/refs/heads/main.zip
+
+# Extract the archive
+unzip main.zip
+cd proxmox-main/postinstall
 
 # Make scripts executable
 chmod +x *.sh
@@ -66,9 +71,22 @@ chmod +x *.sh
 # Run scripts in recommended order
 sudo ./proxmox-repo.sh              # 1. Configure repositories
 sudo ./proxmox-optimize.sh          # 2. Core system optimization
-sudo ./proxmox-network.sh 10gbe # 3. Network optimization (specify your tier)
-sudo ./proxmox-power-management.sh  # 4. Power management (optional)
-sudo ./proxmox-zfs.sh               # 5. ZFS optimization (if using ZFS)
+sudo ./proxmox-zfs.sh               # 3. ZFS optimization (if using ZFS)
+sudo ./proxmox-power-management.sh  # 4. Power management (optional, if needed)
+sudo ./proxmox-network.sh 10gbe     # 5. Network optimization (optional, if needed)
+```
+
+#### Method 2: Git Clone (Alternative)
+
+```bash
+# Clone the repository
+git clone https://github.com/hypersec-io/proxmox.git
+cd proxmox/postinstall
+
+# Make scripts executable
+chmod +x *.sh
+
+# Run scripts as shown above
 ```
 
 ### Post-Installation
@@ -588,7 +606,7 @@ These scripts modify system configuration. While designed to be safe and idempot
 
 ## Support
 
-- Issues: [GitHub Issues](https://github.com/yourusername/proxmox-postinstall/issues)
+- Issues: [GitHub Issues](https://github.com/hypersec-io/proxmox/issues)
 - Documentation: This README and inline script comments
 - Community: Proxmox Forums, r/Proxmox
 

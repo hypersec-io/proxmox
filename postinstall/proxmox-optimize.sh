@@ -83,7 +83,7 @@ echo -e "${CYAN}Backups will be stored in: $BACKUP_DIR${NC}\n"
 #############################################
 # Check and backup Proxmox defaults
 #############################################
-echo -e "${YELLOW}[1/7] Checking Proxmox defaults...${NC}"
+echo -e "${YELLOW}[1/8] Checking Proxmox defaults...${NC}"
 
 # Backup current sysctl settings
 BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
@@ -95,7 +95,7 @@ fi
 #############################################
 # Install Monitoring Tools (with error handling)
 #############################################
-echo -e "\n${YELLOW}[2/7] Installing monitoring tools...${NC}"
+echo -e "\n${YELLOW}[2/8] Installing monitoring tools...${NC}"
 
 # Update package lists first
 echo "Updating package lists..."
@@ -151,9 +151,44 @@ if command -v sensors >/dev/null 2>&1; then
 fi
 
 #############################################
+# Configure Chrony (NTP)
+#############################################
+echo -e "\n${YELLOW}[3/8] Configuring time synchronization...${NC}"
+
+CHRONY_CONF="/etc/chrony/conf.d/99-proxmox-cluster.conf"
+CHRONY_SOURCE="../99-proxmox-cluster.conf"
+
+# Check if chrony is installed
+if command -v chronyc >/dev/null 2>&1; then
+    # Create conf.d directory if it doesn't exist
+    mkdir -p /etc/chrony/conf.d
+
+    # Check if config already exists
+    if [ -f "$CHRONY_CONF" ]; then
+        echo -e "${CYAN}Chrony cluster config already installed${NC}"
+    else
+        # Copy the config file if it exists in the source location
+        if [ -f "$CHRONY_SOURCE" ]; then
+            cp "$CHRONY_SOURCE" "$CHRONY_CONF"
+            echo -e "${GREEN}OK Chrony cluster config installed${NC}"
+
+            # Restart chrony to apply changes
+            systemctl restart chrony >/dev/null 2>&1 && \
+                echo -e "${GREEN}OK Chrony service restarted${NC}" || \
+                echo -e "${YELLOW}Warning: Could not restart chrony${NC}"
+        else
+            echo -e "${YELLOW}Warning: Source config file not found at $CHRONY_SOURCE${NC}"
+            echo "Skipping chrony configuration..."
+        fi
+    fi
+else
+    echo -e "${YELLOW}Chrony not installed, skipping time sync configuration${NC}"
+fi
+
+#############################################
 # Apply Proxmox-safe sysctl settings
 #############################################
-echo -e "\n${YELLOW}[3/7] Configuring kernel parameters...${NC}"
+echo -e "\n${YELLOW}[4/8] Configuring kernel parameters...${NC}"
 
 cat > /etc/sysctl.d/98-proxmox-optimize.conf << 'EOF'
 # Proxmox VM/Container Configuration
@@ -180,14 +215,14 @@ net.bridge.bridge-nf-call-iptables=1
 net.bridge.bridge-nf-call-ip6tables=1
 EOF
 
-sysctl -p /etc/sysctl.d/99-proxmox-optimize.conf >/dev/null 2>&1 || \
+sysctl -p /etc/sysctl.d/98-proxmox-optimize.conf >/dev/null 2>&1 || \
     echo -e "${YELLOW}Some sysctl settings could not be applied${NC}"
 echo -e "${GREEN}OK Kernel parameters configured${NC}"
 
 #############################################
 # Enable Nested Virtualization
 #############################################
-echo -e "\n${YELLOW}[4/7] Configuring nested virtualization...${NC}"
+echo -e "\n${YELLOW}[5/8] Configuring nested virtualization...${NC}"
 
 if [[ "$CPU_VENDOR" == "GenuineIntel" ]]; then
     MOD_FILE="/etc/modprobe.d/kvm-nested.conf"
@@ -216,7 +251,7 @@ fi
 #############################################
 # Configure IOMMU
 #############################################
-echo -e "\n${YELLOW}[5/7] Checking IOMMU configuration...${NC}"
+echo -e "\n${YELLOW}[6/8] Checking IOMMU configuration...${NC}"
 
 GRUB_UPDATED=false
 if [ -f /etc/default/grub ]; then
@@ -260,7 +295,7 @@ fi
 #############################################
 # Storage Configuration
 #############################################
-echo -e "\n${YELLOW}[6/7] Configuring storage...${NC}"
+echo -e "\n${YELLOW}[7/8] Configuring storage...${NC}"
 
 # Enable fstrim
 if command -v systemctl >/dev/null 2>&1; then
@@ -276,7 +311,7 @@ fi
 #############################################
 # Create Management Scripts
 #############################################
-echo -e "\n${YELLOW}[7/7] Creating management scripts...${NC}"
+echo -e "\n${YELLOW}[8/8] Creating management scripts...${NC}"
 
 # Simple status script
 cat > /usr/local/bin/proxmox-status << 'EOF'
@@ -335,11 +370,12 @@ echo -e "${GREEN}OK Management scripts created${NC}"
 echo -e "\n${GREEN}=== Configuration Complete ===${NC}"
 echo ""
 echo "Applied:"
+echo "  • Monitoring tools installed"
+echo "  • Time synchronization configured (chrony)"
 echo "  • Kernel parameters configured"
 echo "  • Nested virtualization configured"
 echo "  • IOMMU ready"
 echo "  • Storage configured"
-echo "  • Monitoring tools installed"
 echo ""
 echo "Commands:"
 echo "  proxmox-status - System status"
