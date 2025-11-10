@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1](https://github.com/hypersec-io/proxmox/compare/v2.2.0...v2.2.1) (2025-11-10)
+
+
+### Bug Fixes
+
+* Move 99-proxmox-cluster.conf to postinstall directory ([9024c09](https://github.com/hypersec-io/proxmox/commit/9024c09d49700e472c9f084932372187ffa4f37d))
+* Update semantic-release config to reference scripts in postinstall directory ([5726bf6](https://github.com/hypersec-io/proxmox/commit/5726bf675300cfc6284a758e5203ed2aef3d205e))
+
 ## [2.1.2] - 2025-10-30
 
 ### Added
