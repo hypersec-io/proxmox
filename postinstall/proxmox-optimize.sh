@@ -39,14 +39,6 @@
 #   - IOMMU/VFIO configuration for device passthrough
 #   - SSD TRIM enablement
 #   - Monitoring tools
-#   - UI customizations (subscription nag removal, community branding)
-#
-# IMPORTANT NOTICE:
-#   This script modifies Proxmox VE UI files which are licensed under AGPLv3.
-#   The script itself is Apache 2.0, but modified Proxmox files remain AGPLv3.
-#   This is provided for personal/internal use with pve-no-subscription repository.
-#   Users must comply with Proxmox VE's AGPLv3 license terms and subscription policy.
-#   See: https://www.proxmox.com/en/proxmox-ve/pricing
 #
 # Idempotent: Yes (safe to run multiple times)
 # Requires Reboot: Yes (if IOMMU or nested virt configured)
@@ -91,7 +83,7 @@ echo -e "${CYAN}Backups will be stored in: $BACKUP_DIR${NC}\n"
 #############################################
 # Check and backup Proxmox defaults
 #############################################
-echo -e "${YELLOW}[1/10] Checking Proxmox defaults...${NC}"
+echo -e "${YELLOW}[1/7] Checking Proxmox defaults...${NC}"
 
 # Backup current sysctl settings
 BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
@@ -103,7 +95,7 @@ fi
 #############################################
 # Install Monitoring Tools (with error handling)
 #############################################
-echo -e "\n${YELLOW}[2/10] Installing monitoring tools...${NC}"
+echo -e "\n${YELLOW}[2/7] Installing monitoring tools...${NC}"
 
 # Update package lists first
 echo "Updating package lists..."
@@ -161,7 +153,7 @@ fi
 #############################################
 # Configure Chrony (NTP)
 #############################################
-echo -e "\n${YELLOW}[3/10] Configuring time synchronization...${NC}"
+echo -e "\n${YELLOW}[3/7] Configuring time synchronization...${NC}"
 
 CHRONY_CONF="/etc/chrony/conf.d/99-proxmox-cluster.conf"
 # Get script directory for config file
@@ -198,7 +190,7 @@ fi
 #############################################
 # Apply Proxmox-safe sysctl settings
 #############################################
-echo -e "\n${YELLOW}[4/10] Configuring kernel parameters...${NC}"
+echo -e "\n${YELLOW}[4/7] Configuring kernel parameters...${NC}"
 
 cat > /etc/sysctl.d/98-proxmox-optimize.conf << 'EOF'
 # Proxmox VM/Container Configuration
@@ -232,7 +224,7 @@ echo -e "${GREEN}OK Kernel parameters configured${NC}"
 #############################################
 # Enable Nested Virtualization
 #############################################
-echo -e "\n${YELLOW}[5/10] Configuring nested virtualization...${NC}"
+echo -e "\n${YELLOW}[5/7] Configuring nested virtualization...${NC}"
 
 if [[ "$CPU_VENDOR" == "GenuineIntel" ]]; then
     MOD_FILE="/etc/modprobe.d/kvm-nested.conf"
@@ -261,7 +253,7 @@ fi
 #############################################
 # Configure IOMMU
 #############################################
-echo -e "\n${YELLOW}[6/10] Checking IOMMU configuration...${NC}"
+echo -e "\n${YELLOW}[6/7] Checking IOMMU configuration...${NC}"
 
 GRUB_UPDATED=false
 if [ -f /etc/default/grub ]; then
@@ -305,7 +297,7 @@ fi
 #############################################
 # Storage Configuration
 #############################################
-echo -e "\n${YELLOW}[7/10] Configuring storage...${NC}"
+echo -e "\n${YELLOW}[7/7] Configuring storage...${NC}"
 
 # Enable fstrim
 if command -v systemctl >/dev/null 2>&1; then
@@ -319,165 +311,9 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 #############################################
-# UI Customizations (Nag Removal + Branding)
-#############################################
-echo -e "\n${YELLOW}[8/10] Configuring UI customizations...${NC}"
-
-WIDGET_FILE="/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js"
-JS_FILE="/usr/share/pve-manager/js/pvemanagerlib.js"
-HTML_FILE="/usr/share/pve-manager/index.html.tpl"
-NEEDS_RESTART=false
-
-# === Subscription Nag Removal ===
-if [ -f "$WIDGET_FILE" ]; then
-    if grep -qF "checked_command: function (orig_cmd) { orig_cmd(); }," "$WIDGET_FILE" 2>/dev/null; then
-        echo -e "${CYAN}Subscription nag already removed${NC}"
-    else
-        START_COUNT=$(grep -c "^        checked_command: function (orig_cmd) {$" "$WIDGET_FILE" 2>/dev/null || echo "0")
-
-        if [ "$START_COUNT" -eq 1 ]; then
-            cp "$WIDGET_FILE" "$BACKUP_DIR/proxmoxlib.js.backup.$(date +%Y%m%d_%H%M%S)"
-            sed -i "/checked_command: function (orig_cmd) {\$/,/^        },\$/c\\        checked_command: function (orig_cmd) { orig_cmd(); }," "$WIDGET_FILE"
-
-            if grep -qF "checked_command: function (orig_cmd) { orig_cmd(); }," "$WIDGET_FILE"; then
-                echo -e "${GREEN}OK Subscription nag removed${NC}"
-                NEEDS_RESTART=true
-            else
-                echo -e "${YELLOW}Warning: Patch verification failed${NC}"
-            fi
-        elif [ "$START_COUNT" -eq 0 ]; then
-            echo -e "${CYAN}Pattern not found (already patched or file changed)${NC}"
-        else
-            echo -e "${YELLOW}Warning: Pattern matches $START_COUNT times (expected 1)${NC}"
-            echo "  Skipping to avoid breaking the file"
-        fi
-    fi
-fi
-
-# === Community Branding (Login Window) ===
-if [ -f "$JS_FILE" ]; then
-    if grep -qF "Proxmox VE Login (Community Repositories)" "$JS_FILE" 2>/dev/null; then
-        echo -e "${CYAN}Login window already branded${NC}"
-    else
-        COUNT=$(grep -cF "title: gettext('Proxmox VE Login')," "$JS_FILE" 2>/dev/null || true)
-        COUNT=${COUNT:-0}
-
-        if [ "$COUNT" -eq 1 ]; then
-            cp "$JS_FILE" "$BACKUP_DIR/pvemanagerlib.js.backup.$(date +%Y%m%d_%H%M%S)"
-            sed -i "s/title: gettext('Proxmox VE Login'),/title: gettext('Proxmox VE Login (Community Repositories)'),/" "$JS_FILE"
-            echo -e "${GREEN}OK Login window branded${NC}"
-            NEEDS_RESTART=true
-        elif [ "$COUNT" -eq 0 ]; then
-            echo -e "${CYAN}Pattern not found (already patched)${NC}"
-        else
-            echo -e "${YELLOW}Warning: Pattern matches $COUNT times (expected 1), skipping${NC}"
-        fi
-    fi
-fi
-
-# === Community Branding (Browser Tab) ===
-if [ -f "$HTML_FILE" ]; then
-    if grep -qF "Proxmox Virtual Environment (Community Repositories)" "$HTML_FILE" 2>/dev/null; then
-        echo -e "${CYAN}Browser tab already branded${NC}"
-    else
-        COUNT=$(grep -cF "<title>[% nodename %] - Proxmox Virtual Environment</title>" "$HTML_FILE" 2>/dev/null || true)
-        COUNT=${COUNT:-0}
-
-        if [ "$COUNT" -eq 1 ]; then
-            cp "$HTML_FILE" "$BACKUP_DIR/index.html.tpl.backup.$(date +%Y%m%d_%H%M%S)"
-            sed -i "s|<title>\[% nodename %\] - Proxmox Virtual Environment</title>|<title>[% nodename %] - Proxmox Virtual Environment (Community Repositories)</title>|" "$HTML_FILE"
-            echo -e "${GREEN}OK Browser tab branded${NC}"
-            NEEDS_RESTART=true
-        elif [ "$COUNT" -eq 0 ]; then
-            echo -e "${CYAN}Pattern not found (already patched)${NC}"
-        else
-            echo -e "${YELLOW}Warning: Pattern matches $COUNT times (expected 1), skipping${NC}"
-        fi
-    fi
-fi
-
-# === Restart Service Once ===
-if [ "$NEEDS_RESTART" == "true" ]; then
-    systemctl restart pveproxy.service >/dev/null 2>&1 && \
-        echo -e "${GREEN}OK pveproxy service restarted${NC}" || \
-        echo -e "${YELLOW}Warning: Could not restart pveproxy${NC}"
-fi
-
-# === Install Unified APT Hook ===
-APT_HOOK_UI="/etc/apt/apt.conf.d/99proxmoxui"
-HOOK_SCRIPT_UI="/usr/local/bin/proxmox-ui-hook.sh"
-
-# Clean up old naming convention (backward compatibility)
-OLD_APT_HOOK="/etc/apt/apt.conf.d/99-proxmox-ui.conf"
-if [ -f "$OLD_APT_HOOK" ]; then
-    rm -f "$OLD_APT_HOOK"
-    echo -e "${CYAN}Removed old naming: $OLD_APT_HOOK${NC}"
-fi
-
-if [ ! -f "$APT_HOOK_UI" ]; then
-    # Create unified hook script
-    cat > "$HOOK_SCRIPT_UI" << 'HOOK_UI_EOF'
-#!/bin/bash
-# Proxmox UI Customization Hook (Nag Removal + Branding)
-
-WIDGET_FILE="/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js"
-JS_FILE="/usr/share/pve-manager/js/pvemanagerlib.js"
-HTML_FILE="/usr/share/pve-manager/index.html.tpl"
-NEEDS_RESTART=false
-
-# === Subscription Nag Removal ===
-if [ -f "$WIDGET_FILE" ]; then
-    if ! grep -qF "checked_command: function (orig_cmd) { orig_cmd(); }," "$WIDGET_FILE" 2>/dev/null; then
-        START_COUNT=$(grep -c "^        checked_command: function (orig_cmd) {$" "$WIDGET_FILE" 2>/dev/null || echo "0")
-        if [ "$START_COUNT" -eq 1 ]; then
-            sed -i "/checked_command: function (orig_cmd) {\$/,/^        },\$/c\\        checked_command: function (orig_cmd) { orig_cmd(); }," "$WIDGET_FILE"
-            NEEDS_RESTART=true
-        fi
-    fi
-fi
-
-# === Community Branding (Login Window) ===
-if [ -f "$JS_FILE" ]; then
-    if ! grep -qF "Proxmox VE Login (Community Repositories)" "$JS_FILE" 2>/dev/null; then
-        if grep -qF "title: gettext('Proxmox VE Login')," "$JS_FILE" 2>/dev/null; then
-            sed -i "s/title: gettext('Proxmox VE Login'),/title: gettext('Proxmox VE Login (Community Repositories)'),/" "$JS_FILE"
-            NEEDS_RESTART=true
-        fi
-    fi
-fi
-
-# === Community Branding (Browser Tab) ===
-if [ -f "$HTML_FILE" ]; then
-    if ! grep -qF "Proxmox Virtual Environment (Community Repositories)" "$HTML_FILE" 2>/dev/null; then
-        if grep -qF "<title>[% nodename %] - Proxmox Virtual Environment</title>" "$HTML_FILE" 2>/dev/null; then
-            sed -i "s|<title>\[% nodename %\] - Proxmox Virtual Environment</title>|<title>[% nodename %] - Proxmox Virtual Environment (Community Repositories)</title>|" "$HTML_FILE"
-            NEEDS_RESTART=true
-        fi
-    fi
-fi
-
-# === Restart Service Once ===
-[ "$NEEDS_RESTART" = "true" ] && systemctl restart pveproxy.service >/dev/null 2>&1
-HOOK_UI_EOF
-
-    chmod +x "$HOOK_SCRIPT_UI"
-
-    # Create unified APT hook
-    cat > "$APT_HOOK_UI" << 'APT_UI_EOF'
-DPkg::Post-Invoke {
-    "/usr/local/bin/proxmox-ui-hook.sh";
-};
-APT_UI_EOF
-
-    echo -e "${GREEN}OK Unified APT hook installed${NC}"
-else
-    echo -e "${CYAN}Unified APT hook already installed${NC}"
-fi
-
-#############################################
 # Create Management Scripts
 #############################################
-echo -e "\n${YELLOW}[10/10] Creating management scripts...${NC}"
+echo -e "\n${YELLOW}Creating management scripts...${NC}"
 
 # Simple status script
 cat > /usr/local/bin/proxmox-status << 'EOF'
@@ -542,14 +378,9 @@ echo "  • Kernel parameters configured"
 echo "  • Nested virtualization configured"
 echo "  • IOMMU ready"
 echo "  • Storage configured"
-echo "  • UI customizations (subscription nag removed, community branding)"
 echo ""
 echo "Commands:"
 echo "  proxmox-status - System status"
-echo ""
-echo "Notes:"
-echo "  • UI modifications survive package updates via APT hooks"
-echo "  • Modified Proxmox files remain under AGPLv3 license"
 echo ""
 
 if [ "$GRUB_UPDATED" == "true" ]; then
