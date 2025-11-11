@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2](https://github.com/hypersec-io/proxmox/compare/v2.2.1...v2.2.2) (2025-11-11)
+
+
+### Bug Fixes
+
+* move UI customizations from optimize to repo script ([34b9be7](https://github.com/hypersec-io/proxmox/commit/34b9be70d0e9d31ba51fe06e9687ba625a86c70f))
+
 ## [2.2.1](https://github.com/hypersec-io/proxmox/compare/v2.2.0...v2.2.1) (2025-11-10)
 
 
