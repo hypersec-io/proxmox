@@ -1,7 +1,7 @@
 {
   "name": "proxmox-postinstall-toolkit",
   "version": "2.1.0",
-  "description": "Idempotent scripts for configuring Proxmox VE 9 installations",
+  "description": "Idempotent scripts for configuring Proxmox VE installations",
   "scripts": {
     "lint": "shellcheck -x *.sh",
     "test": "bash -n *.sh && shellcheck -x *.sh",

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #############################################
-# Proxmox VE 9 Repository Configuration
+# Proxmox VE Repository Configuration
 #############################################
 #
 # Copyright 2025 HyperSec
@@ -29,8 +29,8 @@
 #   sudo ./proxmox-repo.sh
 #
 # Requirements:
-#   - Proxmox VE 9.x
-#   - Debian 13 (Trixie)
+#   - Proxmox VE (auto-detects version)
+#   - Debian-based system (auto-detects codename)
 #   - Root privileges
 #   - Internet connection
 #
@@ -79,23 +79,87 @@ NC='\033[0m'
 BACKUP_DIR="/root/backup"
 mkdir -p "$BACKUP_DIR"
 
-echo -e "${GREEN}=== Proxmox Repository & UI Configuration ===${NC}\n"
+#############################################
+# Auto-detect Debian Codename
+#############################################
+
+# Detect Debian codename from os-release
+if [ -f /etc/os-release ]; then
+    # shellcheck source=/dev/null
+    . /etc/os-release
+    DEBIAN_CODENAME="${VERSION_CODENAME:-}"
+fi
+
+# Fallback: try lsb_release
+if [ -z "$DEBIAN_CODENAME" ] && command -v lsb_release &>/dev/null; then
+    DEBIAN_CODENAME=$(lsb_release -cs 2>/dev/null || true)
+fi
+
+# Validate codename
+if [ -z "$DEBIAN_CODENAME" ]; then
+    echo -e "${RED}Error: Could not detect Debian codename${NC}"
+    echo "Please ensure /etc/os-release exists or lsb_release is installed"
+    exit 1
+fi
+
+echo -e "${GREEN}=== Proxmox Repository & UI Configuration ===${NC}"
+echo -e "Detected Debian codename: ${CYAN}${DEBIAN_CODENAME}${NC}\n"
 
 #############################################
 # Configure Repositories
 #############################################
 echo -e "${YELLOW}[1/3] Configuring repositories...${NC}"
 
-# Create no-subscription repository file
-cat > /etc/apt/sources.list.d/debian.sources << 'EOF'
+# Configure Debian official repositories (using detected codename)
+DEBIAN_SOURCES="/etc/apt/sources.list.d/debian-official.sources"
+DEBIAN_SOURCES_CONTENT="Types: deb
+URIs: http://deb.debian.org/debian
+Suites: ${DEBIAN_CODENAME}
+Components: main contrib non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://security.debian.org/debian-security
+Suites: ${DEBIAN_CODENAME}-security
+Components: main contrib non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: ${DEBIAN_CODENAME}-updates
+Components: main contrib non-free-firmware
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg"
+
+if [ -f "$DEBIAN_SOURCES" ]; then
+    EXISTING_CONTENT=$(cat "$DEBIAN_SOURCES")
+    if [ "$EXISTING_CONTENT" = "$DEBIAN_SOURCES_CONTENT" ]; then
+        echo -e "${CYAN}Debian official repositories already configured${NC}"
+    else
+        echo "$DEBIAN_SOURCES_CONTENT" > "$DEBIAN_SOURCES"
+        echo -e "${GREEN}OK Debian official repositories updated${NC}"
+    fi
+else
+    echo "$DEBIAN_SOURCES_CONTENT" > "$DEBIAN_SOURCES"
+    echo -e "${GREEN}OK Debian official repositories configured${NC}"
+fi
+
+# Configure Proxmox no-subscription repository (using detected codename)
+cat > /etc/apt/sources.list.d/proxmox.sources << EOF
 Types: deb
 URIs: http://download.proxmox.com/debian/pve
-Suites: trixie
+Suites: ${DEBIAN_CODENAME}
 Components: pve-no-subscription
 Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
 EOF
 
-echo -e "${GREEN}OK No-subscription repository configured${NC}"
+echo -e "${GREEN}OK Proxmox no-subscription repository configured${NC}"
+
+# Clean up old/misnamed repository files
+OLD_DEBIAN_SOURCES="/etc/apt/sources.list.d/debian.sources"
+if [ -f "$OLD_DEBIAN_SOURCES" ] && grep -q "download.proxmox.com" "$OLD_DEBIAN_SOURCES" 2>/dev/null; then
+    rm -f "$OLD_DEBIAN_SOURCES"
+    echo -e "${CYAN}Removed old misnamed file: $OLD_DEBIAN_SOURCES${NC}"
+fi
 
 # Disable enterprise repositories
 if [ -f "/etc/apt/sources.list.d/pve-enterprise.sources" ]; then
@@ -283,7 +347,8 @@ fi
 echo -e "\n${GREEN}=== Configuration Complete ===${NC}"
 echo ""
 echo "Applied:"
-echo "  • No-subscription repository enabled"
+echo "  • Debian ${DEBIAN_CODENAME} official repositories configured"
+echo "  • Proxmox no-subscription repository enabled"
 echo "  • Enterprise repositories disabled"
 echo "  • Subscription nag removed"
 echo "  • Community edition branding added"

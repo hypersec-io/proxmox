@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #############################################
-# Proxmox VE 9 System Optimization Script
+# Proxmox VE System Optimization Script
 #############################################
 #
 # Copyright 2025 HyperSec
@@ -28,8 +28,8 @@
 #   sudo ./proxmox-optimize.sh
 #
 # Requirements:
-#   - Proxmox VE 9.x
-#   - Debian 13 (Trixie)
+#   - Proxmox VE
+#   - Debian-based system
 #   - Root privileges
 #   - Internet connection for package installation
 #

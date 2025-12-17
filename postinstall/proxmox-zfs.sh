@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #############################################
-# Proxmox VE 9 ZFS Safe Optimization Script
+# Proxmox VE ZFS Safe Optimization Script
 #############################################
 #
 # Copyright 2025 HyperSec
@@ -28,8 +28,8 @@
 #   sudo ./proxmox-zfs.sh
 #
 # Requirements:
-#   - Proxmox VE 9.x with ZFS
-#   - Debian 13 (Trixie)
+#   - Proxmox VE with ZFS
+#   - Debian-based system
 #   - Root privileges
 #   - ZFS pools configured
 #
@@ -52,7 +52,6 @@ set -e
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
-RED='\033[0;31m'
 NC='\033[0m'
 
 # Must be root
@@ -153,9 +152,9 @@ echo -e "${GREEN}OK Persistent configuration saved${NC}"
 echo -e "\n${YELLOW}Checking autotrim settings...${NC}"
 
 for pool in $(zpool list -H -o name); do
-    CURRENT_TRIM=$(zpool get -H -o value autotrim $pool)
+    CURRENT_TRIM=$(zpool get -H -o value autotrim "$pool")
     if [ "$CURRENT_TRIM" != "on" ]; then
-        zpool set autotrim=on $pool
+        zpool set autotrim=on "$pool"
         echo -e "${GREEN}OK Autotrim enabled on $pool${NC}"
     else
         echo -e "${CYAN}Autotrim already enabled on $pool${NC}"
@@ -185,11 +184,11 @@ if [ -f /etc/pve/storage.cfg ]; then
         POOL=$(grep -A5 "^zfspool: $storage" /etc/pve/storage.cfg | grep "pool" | awk '{print $2}')
         if [ -n "$POOL" ]; then
             # Check compression (Proxmox sets per-volume)
-            COMP=$(zfs get -H -o value compression $POOL 2>/dev/null || echo "off")
+            COMP=$(zfs get -H -o value compression "$POOL" 2>/dev/null || echo "off")
             echo "    Compression: $COMP"
-            
+
             # Check volblocksize (Proxmox default is 8k)
-            VBS=$(zfs get -H -o value volblocksize $POOL 2>/dev/null || echo "8k")
+            VBS=$(zfs get -H -o value volblocksize "$POOL" 2>/dev/null || echo "8k")
             echo "    Default volblocksize: $VBS"
         fi
     done

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #############################################
-# Proxmox VE 9 Power Management Configuration
+# Proxmox VE Power Management Configuration
 #############################################
 #
 # Copyright 2025 HyperSec
@@ -28,8 +28,8 @@
 #   sudo ./proxmox-power-management.sh
 #
 # Requirements:
-#   - Proxmox VE 9.x
-#   - Debian 13 (Trixie)
+#   - Proxmox VE
+#   - Debian-based system
 #   - Root privileges
 #   - CPU with frequency scaling support
 #
@@ -105,11 +105,17 @@ if [ ! -d "$BACKUP_DIR" ]; then
     mkdir -p "$BACKUP_DIR"
     
     # Backup GRUB if exists
-    [ -f /etc/default/grub ] && cp /etc/default/grub "$BACKUP_DIR/" 2>/dev/null || true
-    
+    if [ -f /etc/default/grub ]; then
+        cp /etc/default/grub "$BACKUP_DIR/" 2>/dev/null || true
+    fi
+
     # Backup existing power management configs
-    [ -f /etc/default/cpufrequtils ] && cp /etc/default/cpufrequtils "$BACKUP_DIR/" 2>/dev/null || true
-    [ -d /etc/modules-load.d ] && cp -r /etc/modules-load.d "$BACKUP_DIR/" 2>/dev/null || true
+    if [ -f /etc/default/cpufrequtils ]; then
+        cp /etc/default/cpufrequtils "$BACKUP_DIR/" 2>/dev/null || true
+    fi
+    if [ -d /etc/modules-load.d ]; then
+        cp -r /etc/modules-load.d "$BACKUP_DIR/" 2>/dev/null || true
+    fi
     
     echo -e "${GREEN}OK Backup created${NC}"
 else
@@ -138,7 +144,9 @@ if [ ! -d "/sys/devices/system/cpu/cpu0/cpufreq" ]; then
         for driver in amd-pstate-epp amd-pstate acpi-cpufreq; do
             if ! lsmod | grep -q "^$driver"; then
                 echo "Loading $driver..."
-                modprobe $driver 2>/dev/null && echo -e "${GREEN}OK Loaded $driver${NC}" || true
+                if modprobe "$driver" 2>/dev/null; then
+                    echo -e "${GREEN}OK Loaded $driver${NC}"
+                fi
             else
                 echo "$driver already loaded"
             fi
@@ -178,7 +186,9 @@ if [ -f "/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors" ]; th
     if [ "$CURRENT_GOVERNOR" != "$GOVERNOR" ]; then
         echo "Setting $GOVERNOR governor..."
         for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-            [ -f "$cpu" ] && echo "$GOVERNOR" > "$cpu" 2>/dev/null || true
+            if [ -f "$cpu" ]; then
+                echo "$GOVERNOR" > "$cpu" 2>/dev/null || true
+            fi
         done
         echo -e "${GREEN}OK $GOVERNOR governor applied${NC}"
     else
@@ -189,7 +199,9 @@ if [ -f "/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors" ]; th
     if [ "$GOVERNOR" == "schedutil" ]; then
         echo "Tuning schedutil for balanced performance..."
         for policy in /sys/devices/system/cpu/cpufreq/policy*/; do
-            [ -f "${policy}schedutil/rate_limit_us" ] && echo 1000 > "${policy}schedutil/rate_limit_us" 2>/dev/null || true
+            if [ -f "${policy}schedutil/rate_limit_us" ]; then
+                echo 1000 > "${policy}schedutil/rate_limit_us" 2>/dev/null || true
+            fi
         done
     elif [ "$GOVERNOR" == "ondemand" ] && [ -d "/sys/devices/system/cpu/cpufreq/ondemand" ]; then
         echo "Tuning ondemand for balanced performance..."
@@ -257,7 +269,7 @@ fi
 echo -e "\n${YELLOW}[3/8] Configuring PCIe Power Management (balanced)${NC}"
 
 if [ -f /sys/module/pcie_aspm/parameters/policy ]; then
-    CURRENT_ASPM=$(cat /sys/module/pcie_aspm/parameters/policy | grep -oE '\[.*\]' | tr -d '[]' 2>/dev/null || echo "")
+    CURRENT_ASPM=$(grep -oE '\[.*\]' /sys/module/pcie_aspm/parameters/policy 2>/dev/null | tr -d '[]' || echo "")
     
     if [ "$CURRENT_ASPM" != "powersave" ]; then
         echo "Current ASPM policy: $CURRENT_ASPM"
@@ -287,13 +299,13 @@ set +e
 
 for host in /sys/class/scsi_host/host*/; do
     if [ -f "${host}link_power_management_policy" ]; then
-        CURRENT=$(cat "${host}link_power_management_policy" 2>/dev/null | tr -d ' ')
-        
+        CURRENT=$(tr -d ' ' < "${host}link_power_management_policy" 2>/dev/null)
+
         # Check if already configured
         if [[ "$CURRENT" == "med_power_with_dipm" ]] || [[ "$CURRENT" == "medium_power" ]] || [[ "$CURRENT" == "min_power" ]]; then
-            echo "  $(basename $host): Already configured ($CURRENT)"
+            echo "  $(basename "$host"): Already configured ($CURRENT)"
         else
-            echo "  $(basename $host): Current = $CURRENT"
+            echo "  $(basename "$host"): Current = $CURRENT"
             # Try different policy names
             for policy in "med_power_with_dipm" "medium_power" "min_power"; do
                 if echo "$policy" > "${host}link_power_management_policy" 2>/dev/null; then
@@ -316,20 +328,25 @@ set -e
 #############################################
 echo -e "\n${YELLOW}[5/8] Configuring Network Power Management${NC}"
 
-for iface in $(ls /sys/class/net/ | grep -E '^(eth|eno|enp|ens)'); do
-    if [ -d "/sys/class/net/$iface" ] && [ "$iface" != "lo" ]; then
+for iface in /sys/class/net/*/; do
+    iface=$(basename "$iface")
+    if [[ "$iface" =~ ^(eth|eno|enp|ens) ]] && [ -d "/sys/class/net/$iface" ]; then
         echo "Checking $iface..."
-        
+
         # Check current WoL setting
         CURRENT_WOL=$(ethtool "$iface" 2>/dev/null | grep "Wake-on:" | awk '{print $2}')
         if [ "$CURRENT_WOL" != "g" ]; then
-            ethtool -s "$iface" wol g 2>/dev/null && echo "  WoL enabled" || true
+            if ethtool -s "$iface" wol g 2>/dev/null; then
+                echo "  WoL enabled"
+            fi
         fi
-        
+
         # Enable EEE if not already enabled
-        ethtool --show-eee "$iface" 2>/dev/null | grep -q "EEE status: enabled" || {
-            ethtool --set-eee "$iface" eee on 2>/dev/null && echo "  EEE enabled" || true
-        }
+        if ! ethtool --show-eee "$iface" 2>/dev/null | grep -q "EEE status: enabled"; then
+            if ethtool --set-eee "$iface" eee on 2>/dev/null; then
+                echo "  EEE enabled"
+            fi
+        fi
     fi
 done
 
@@ -347,7 +364,7 @@ set +e
 for usb in /sys/bus/usb/devices/*/power/control; do
     if [ -f "$usb" ]; then
         CURRENT=$(cat "$usb" 2>/dev/null || echo "")
-        DEVICE_PATH=$(dirname $(dirname "$usb"))
+        DEVICE_PATH=$(dirname "$(dirname "$usb")")
         
         # Check for HID devices
         if [ -f "$DEVICE_PATH/bInterfaceClass" ]; then
@@ -400,7 +417,7 @@ set +e
 for pci in /sys/bus/pci/devices/*/power/control; do
     if [ -f "$pci" ]; then
         CURRENT=$(cat "$pci" 2>/dev/null || echo "")
-        DEVICE=$(basename $(dirname $(dirname "$pci")))
+        DEVICE=$(basename "$(dirname "$(dirname "$pci")")")
         DEVICE_CLASS=$(cat "/sys/bus/pci/devices/$DEVICE/class" 2>/dev/null || echo "")
         
         # Skip critical devices
@@ -512,7 +529,7 @@ fi
 for usb in /sys/bus/usb/devices/*/power/control; do
     if [ -f "$usb" ]; then
         CURRENT=$(cat "$usb" 2>/dev/null || echo "")
-        DEVICE_PATH=$(dirname $(dirname "$usb"))
+        DEVICE_PATH=$(dirname "$(dirname "$usb")")
         if [ -f "$DEVICE_PATH/bInterfaceClass" ]; then
             CLASS=$(cat "$DEVICE_PATH/bInterfaceClass" 2>/dev/null || echo "")
             if [ "$CLASS" == "03" ]; then
@@ -622,7 +639,7 @@ else
 fi
 echo ""
 echo -n "PCIe ASPM: "
-cat /sys/module/pcie_aspm/parameters/policy 2>/dev/null | grep -oE '\[.*\]' | tr -d '[]' || echo "N/A"
+grep -oE '\[.*\]' /sys/module/pcie_aspm/parameters/policy 2>/dev/null | tr -d '[]' || echo "N/A"
 echo ""
 if [ -f /sys/devices/system/cpu/cpufreq/boost ]; then
     echo -n "AMD Boost: "
@@ -695,7 +712,7 @@ echo -e "\n${CYAN}Configuration Status:${NC}"
 echo -n "  • CPU Governor: "
 cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "N/A"
 echo -n "  • PCIe ASPM: "
-cat /sys/module/pcie_aspm/parameters/policy 2>/dev/null | grep -oE '\[.*\]' | tr -d '[]' || echo "N/A"
+grep -oE '\[.*\]' /sys/module/pcie_aspm/parameters/policy 2>/dev/null | tr -d '[]' || echo "N/A"
 
 echo -e "\n${CYAN}Available Commands:${NC}"
 echo -e "  ${GREEN}power-status${NC}      - Check current power state"

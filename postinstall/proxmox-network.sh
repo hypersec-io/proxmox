@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #############################################
-# Proxmox VE 9 Network Optimization Script
+# Proxmox VE Network Optimization Script
 #############################################
 #
 # Copyright 2025 HyperSec
@@ -39,8 +39,8 @@
 #     sudo ./proxmox-network-gbe.sh 200gbe --jumbo # Manual: 200 Gigabit with Jumbo Frames
 #
 # Requirements:
-#   - Proxmox VE 9.x
-#   - Debian 13 (Trixie)
+#   - Proxmox VE
+#   - Debian-based system
 #   - Root privileges
 #   - ethtool installed
 #
@@ -132,7 +132,9 @@ if [[ "$TIER" == "auto" ]]; then
     # If no bridge ports found, check all physical interfaces
     if [ ${#PROXMOX_INTERFACES[@]} -eq 0 ]; then
         echo -e "${YELLOW}INFO  No bridge ports found, checking all physical interfaces${NC}"
-        PROXMOX_INTERFACES=($(ip -o link show | awk -F': ' '{print $2}' | grep -E '^(eth|eno|enp|ens)'))
+        while IFS= read -r iface; do
+            PROXMOX_INTERFACES+=("$iface")
+        done < <(ip -o link show | awk -F': ' '{print $2}' | grep -E '^(eth|eno|enp|ens)')
     fi
 
     # Find the fastest interface
@@ -322,7 +324,7 @@ echo -e "${CYAN}Max TCP Buffer: $(( RMEM_MAX / 1024 / 1024 )) MB${NC}\n"
 #############################################
 echo -e "${YELLOW} [1/5] Configuring kernel network parameters...${NC}"
 
-cat > /etc/sysctl.d/99-proxmox-network-${TIER}.conf << EOF
+cat > "/etc/sysctl.d/99-proxmox-network-${TIER}.conf" << EOF
 # Proxmox Network Configuration - ${TIER_NAME}
 # Generated: $(date)
 # Tier: ${TIER}
@@ -377,7 +379,7 @@ net.ipv4.tcp_fastopen = 3
 EOF
 
 # Apply settings
-sysctl -p /etc/sysctl.d/99-proxmox-network-${TIER}.conf >/dev/null 2>&1 || {
+sysctl -p "/etc/sysctl.d/99-proxmox-network-${TIER}.conf" >/dev/null 2>&1 || {
     echo -e "${YELLOW}WARNING  Some settings could not be applied (may need reboot)${NC}"
 }
 
@@ -464,10 +466,12 @@ echo -e "\n${YELLOW} [3/5] Configuring TCP congestion control...${NC}"
 # Check if BBR is available and load it if needed
 if [[ "$CONGESTION_CONTROL" == "bbr" ]]; then
     if ! lsmod | grep -q "tcp_bbr"; then
-        modprobe tcp_bbr 2>/dev/null && echo "  OK BBR module loaded" || {
+        if modprobe tcp_bbr 2>/dev/null; then
+            echo "  OK BBR module loaded"
+        else
             echo -e "  ${YELLOW}WARNING  BBR not available, using CUBIC${NC}"
             CONGESTION_CONTROL="cubic"
-        }
+        fi
     else
         echo "  OK BBR already loaded"
     fi
