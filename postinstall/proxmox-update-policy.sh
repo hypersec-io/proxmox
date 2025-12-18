@@ -27,7 +27,7 @@
 #
 # Policy:
 #   - MAJOR: Same as latest available
-#   - MINOR: n-1 (one behind latest, or 0 if latest is 0)
+#   - MINOR: max(installed_minor, n-1) - never downgrades
 #   - PATCH: Latest available within the target minor
 #
 # Example:
@@ -35,6 +35,8 @@
 #   - Policy pins to 9.1.* (allowing up to 9.1.5)
 #   If repo only has 9.0.x available:
 #   - Policy pins to 9.0.* (can't go below 0)
+#   If installed is 9.1.x and repo has 9.1.0 as latest:
+#   - Policy pins to 9.1.* (never downgrades to 9.0.*)
 #
 # Usage:
 #   sudo ./proxmox-update-policy.sh [command]
@@ -94,6 +96,17 @@ PROXMOX_PACKAGES=(
 get_installed_version() {
     local pkg="$1"
     dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || echo ""
+}
+
+get_installed_minor() {
+    # Get the major.minor of the currently installed proxmox-ve
+    local installed
+    installed=$(get_installed_version "proxmox-ve")
+    if [ -n "$installed" ]; then
+        echo "$installed" | grep -oE '^[0-9]+\.[0-9]+' || echo ""
+    else
+        echo ""
+    fi
 }
 
 get_available_versions() {
@@ -242,6 +255,27 @@ enable_policy() {
     local target_minor
     target_minor=$(get_target_minor "$latest_minor")
 
+    # Get currently installed minor version as floor (never downgrade)
+    local installed_minor
+    installed_minor=$(get_installed_minor)
+
+    # Ensure target is at least the installed minor (never downgrade)
+    if [ -n "$installed_minor" ]; then
+        # Compare versions: if installed > target, use installed as floor
+        local installed_major installed_min target_major target_min
+        installed_major=$(echo "$installed_minor" | cut -d. -f1)
+        installed_min=$(echo "$installed_minor" | cut -d. -f2)
+        target_major=$(echo "$target_minor" | cut -d. -f1)
+        target_min=$(echo "$target_minor" | cut -d. -f2)
+
+        # If installed minor is greater than computed target, use installed as floor
+        if [ "$installed_major" -eq "$target_major" ] && [ "$installed_min" -gt "$target_min" ]; then
+            [ -z "$quiet" ] && echo -e "${YELLOW}Note: Installed version ($installed_minor) > n-1 target ($target_minor)${NC}"
+            [ -z "$quiet" ] && echo -e "${YELLOW}Using installed minor as floor: $installed_minor${NC}"
+            target_minor="$installed_minor"
+        fi
+    fi
+
     # Verify target minor exists in repo
     local available_minors
     available_minors=$(get_available_minors "$versions")
@@ -383,7 +417,7 @@ show_help() {
     echo ""
     echo "Policy behaviour:"
     echo "  MAJOR: Same as latest available"
-    echo "  MINOR: n-1 (one behind latest, minimum 0)"
+    echo "  MINOR: max(installed, n-1) - never downgrades below installed"
     echo "  PATCH: Latest available within target minor"
     echo ""
     echo "Example:"
