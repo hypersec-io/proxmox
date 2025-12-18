@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+# [2.4.0](https://github.com/hypersec-io/proxmox/compare/v2.3.1...v2.4.0) (2025-12-18)
+
+
+### Features
+
+* **internal-nat:** add script for VM internal NAT networking ([e4ab9f9](https://github.com/hypersec-io/proxmox/commit/e4ab9f948a19368c97db7972041652e2f6910a85))
+
 ## [2.3.1](https://github.com/hypersec-io/proxmox/compare/v2.3.0...v2.3.1) (2025-12-18)
 
 
