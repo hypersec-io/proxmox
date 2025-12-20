@@ -96,31 +96,25 @@ echo -e "${GREEN}Detected: $CPU_MODEL${NC}"
 echo -e "${GREEN}Vendor: $CPU_VENDOR${NC}"
 
 #############################################
-# Create backup (only if not already backed up today)
+# Create backup
 #############################################
-BACKUP_DATE=$(date +%Y%m%d)
-BACKUP_DIR="/root/power-backup-${BACKUP_DATE}"
-if [ ! -d "$BACKUP_DIR" ]; then
-    echo -e "\n${YELLOW}Creating backup in $BACKUP_DIR${NC}"
-    mkdir -p "$BACKUP_DIR"
-    
-    # Backup GRUB if exists
-    if [ -f /etc/default/grub ]; then
-        cp /etc/default/grub "$BACKUP_DIR/" 2>/dev/null || true
-    fi
+BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_DIR="/root/backup/proxmox-config"
+mkdir -p "$BACKUP_DIR"
 
-    # Backup existing power management configs
-    if [ -f /etc/default/cpufrequtils ]; then
-        cp /etc/default/cpufrequtils "$BACKUP_DIR/" 2>/dev/null || true
-    fi
-    if [ -d /etc/modules-load.d ]; then
-        cp -r /etc/modules-load.d "$BACKUP_DIR/" 2>/dev/null || true
-    fi
-    
-    echo -e "${GREEN}OK Backup created${NC}"
-else
-    echo -e "${CYAN}Backup already exists for today, skipping${NC}"
+echo -e "\n${YELLOW}Creating backup in $BACKUP_DIR${NC}"
+
+# Backup GRUB if exists
+if [ -f /etc/default/grub ]; then
+    cp /etc/default/grub "$BACKUP_DIR/power-grub-$BACKUP_DATE" 2>/dev/null || true
 fi
+
+# Backup existing power management configs
+if [ -f /etc/default/cpufrequtils ]; then
+    cp /etc/default/cpufrequtils "$BACKUP_DIR/power-cpufrequtils-$BACKUP_DATE" 2>/dev/null || true
+fi
+
+echo -e "${GREEN}OK Backup created${NC}"
 
 #############################################
 # CPU Governor Configuration

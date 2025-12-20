@@ -79,13 +79,13 @@ NC='\033[0m'
 [ $EUID -ne 0 ] && { echo -e "${RED}Must run as root${NC}"; exit 1; }
 
 # Create backup directory
-BACKUP_DIR="/root/network-backup"
+BACKUP_DIR="/root/backup/proxmox-config"
 BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p "$BACKUP_DIR"
 
 # Backup existing sysctl settings
-if [ ! -f "$BACKUP_DIR/sysctl-network-$BACKUP_DATE.conf" ]; then
-    sysctl -a 2>/dev/null | grep -E "net\." > "$BACKUP_DIR/sysctl-network-$BACKUP_DATE.conf" || true
+if [ ! -f "$BACKUP_DIR/network-sysctl-$BACKUP_DATE.conf" ]; then
+    sysctl -a 2>/dev/null | grep -E "net\." > "$BACKUP_DIR/network-sysctl-$BACKUP_DATE.conf" || true
     echo -e "${GREEN}OK Network settings backed up${NC}"
 fi
 

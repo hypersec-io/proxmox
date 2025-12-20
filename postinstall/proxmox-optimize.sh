@@ -67,7 +67,7 @@ NC='\033[0m'
 [ $EUID -ne 0 ] && { echo "Run as root"; exit 1; }
 
 # Create backup directory
-BACKUP_DIR="/root/backup"
+BACKUP_DIR="/root/backup/proxmox-config"
 mkdir -p "$BACKUP_DIR"
 
 # Detect system info

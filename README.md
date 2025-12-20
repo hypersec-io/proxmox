@@ -2,208 +2,137 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Proxmox](https://img.shields.io/badge/Proxmox-9.x-orange.svg)](https://www.proxmox.com/)
-[![Debian](https://img.shields.io/badge/Debian-13%20Trixie-red.svg)](https://www.debian.org/)
 
-A collection of idempotent scripts for post-installation configuration of Proxmox VE 9 on Debian 13 (Trixie). Includes system configuration, network tuning, power management, and ZFS settings.
+Idempotent scripts for Proxmox VE post-installation configuration. Brought to you by the hoopy froods at HyperSec.
 
 ---
 
-## Features
+## What's in the Box
 
-### Core System Configuration
-- **Kernel Parameter Tuning** - sysctl settings for VM/container workloads
-- **Nested Virtualization** - Intel VT-x/AMD-V support for nested VMs
-- **IOMMU/VFIO Configuration** - GPU and device passthrough support
-- **SSD TRIM** - Automatic TRIM scheduling
-- **Monitoring Tools** - htop, iotop, smartmontools
-
-### Network Configuration
-- **GbE Tier-Based Tuning** - Configuration for 1/10/25/40/100/200 GbE networks
-- **TCP Buffer Scaling** - Buffer sizes based on network speed
-- **BBR Congestion Control** - Congestion algorithm for high-speed links
-- **NIC Hardware Offloading** - TSO, GSO, GRO enablement
-- **Ring Buffer Configuration** - RX/TX queue sizes
-- **Jumbo Frame Support** - MTU 9000 support for high-speed networks
-
-### Power Management
-- **CPU Frequency Scaling** - schedutil/ondemand governors with balanced profiles
-- **PCIe ASPM** - Active State Power Management for PCIe devices
-- **Storage Power Management** - SATA link power optimization
-- **USB/PCI Runtime PM** - Selective power management for peripherals
-- **Thermal Monitoring** - Temperature monitoring
-- **Power Profiles** - Performance, Balanced, and Powersave modes
-
-### ZFS Configuration
-- **ARC Memory Management** - RAM-aware caching limits
-- **Autotrim** - Automatic SSD TRIM for ZFS pools
-- **Dataset Settings** - atime and xattr tuning
-- **Data Integrity** - Preserves safety settings (sync, cache)
-
-### Repository Management
-- **No-Subscription Repos** - Community repository configuration
-- **Enterprise Repo Disable** - Automatic enterprise source disabling
+- **System Optimisation** - Kernel tuning, nested virtualisation, IOMMU/VFIO passthrough, SSD TRIM
+- **Network Tuning** - Tier-based TCP/UDP buffers (1/10/25/40/100/200 GbE), BBR congestion control, NIC offloading
+- **Power Management** - CPU governors, PCIe ASPM, thermal monitoring, power profiles
+- **ZFS Tuning** - RAM-aware ARC sizing, autotrim, dataset settings
+- **Repository Config** - No-subscription repos, enterprise repo disable
+- **Conservative Updates** - N-1 minor version pinning, UI customisation, APT persistence hooks
+- **Internal NAT** - Host-side VM networking with any IPv4 CIDR
 
 ---
 
 ## Quick Start
 
-### Prerequisites
-- Proxmox VE 9.x installed
-- Debian 13 (Trixie) base
-- Root access
-- Internet connection for package installation
-
-### Installation
-
-#### Method 1: Download Latest (Recommended)
-
 ```bash
-# Download the latest version from main branch
+# Download and extract
 wget https://github.com/hypersec-io/proxmox/archive/refs/heads/main.zip
-
-# Extract the archive
-unzip main.zip
-cd proxmox-main/postinstall
-
-# Make scripts executable
+unzip main.zip && cd proxmox-main/postinstall
 chmod +x *.sh
 
-# Run scripts in recommended order
-sudo ./proxmox-repo.sh              # 1. Configure repositories
-sudo ./proxmox-optimize.sh          # 2. Core system optimization
-sudo ./proxmox-zfs.sh               # 3. ZFS optimization (if using ZFS)
-sudo ./proxmox-power-management.sh  # 4. Power management (optional, if needed)
-sudo ./proxmox-network.sh 10gbe     # 5. Network optimization (optional, if needed)
+# Run in order
+sudo ./proxmox-repo.sh              # Configure repositories
+sudo ./proxmox-optimize.sh          # Core system optimisation
+sudo ./proxmox-zfs.sh               # ZFS tuning (if applicable)
+sudo ./proxmox-power-management.sh  # Power management (optional)
+sudo ./proxmox-network.sh 10gbe     # Network tuning (optional)
+sudo ./proxmox-update-policy.sh enable  # Conservative updates (optional)
 ```
 
-#### Method 2: Git Clone (Alternative)
+After running, update GRUB and reboot if prompted:
 
 ```bash
-# Clone the repository
-git clone https://github.com/hypersec-io/proxmox.git
-cd proxmox/postinstall
-
-# Make scripts executable
-chmod +x *.sh
-
-# Run scripts as shown above
-```
-
-### Post-Installation
-
-```bash
-# Update GRUB (if IOMMU or power settings changed)
-sudo update-grub
-
-# Reboot to apply all changes
-sudo reboot
-
-# Verify configuration
-proxmox-status          # System status
-power-status            # Power management status (if installed)
-thermal-check           # CPU temperature check (if installed)
-zfs-status              # ZFS status (if installed)
+sudo update-grub && sudo reboot
 ```
 
 ---
 
-## Scripts Overview
+## Scripts
 
-### `proxmox-repo.sh`
-**Purpose**: Configure Proxmox repositories for non-subscription use
+### proxmox-repo.sh
 
-**What it does**:
+Configures Proxmox VE repositories for community (no-subscription) use.
+
+**What it does:**
+
 - Creates no-subscription repository configuration
 - Disables enterprise repositories
 - Updates package lists
 
-**Idempotent**: Yes
-**Requires Reboot**: No
-**Backup Created**: No (safe operations)
+**Note:** UI customisations (warning suppression) are handled by `proxmox-update-policy.sh`.
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | No |
+| Backup | None (safe operations) |
 
 ---
 
-### `proxmox-network.sh`
-**Purpose**: Network configuration based on interface speed tier
+### proxmox-update-policy.sh
 
-**What it does**:
-- Detects or accepts network speed tier (1/10/25/40/100/200 GbE)
-- Configures TCP/UDP buffer sizes for the tier
-- Configures network queue depths and backlogs
-- Enables BBR congestion control for 10GbE+
-- Configures NIC ring buffers and hardware offloading
-- Provides Jumbo Frame support (--jumbo flag)
-- Creates network monitoring commands
+Conservative update policy with n-1 minor version pinning. Keeps you one minor version behind bleeding edge while allowing patch updates.
 
-**Idempotent**: Yes
-**Requires Reboot**: No
-**Backup Location**: `/root/network-backup`
+**What it does:**
 
-**Usage**:
+- Pins Proxmox packages to one minor version behind latest
+- Applies UI patches to replace "not recommended for production" warnings
+- Creates APT hook for persistence across package updates
+- Supports daily cron job for automatic policy refresh
+- Never downgrades below installed version
+
+**Policy behaviour:**
+
+- **MAJOR:** Same as latest available
+- **MINOR:** max(installed, n-1) - never downgrades
+- **PATCH:** Latest within target minor
+
+**Example:** If repo has 9.2.3, policy pins to 9.1.* (gets 9.1.x patches, skips 9.2.x)
+
+**Commands:**
+
 ```bash
-sudo ./proxmox-network.sh 1gbe    # 1 Gigabit (default, conservative)
-sudo ./proxmox-network.sh 10gbe   # 10 Gigabit (recommended)
-sudo ./proxmox-network.sh 25gbe   # 25 Gigabit
-sudo ./proxmox-network.sh 40gbe   # 40 Gigabit
-sudo ./proxmox-network.sh 100gbe  # 100 Gigabit
-sudo ./proxmox-network.sh 200gbe  # 200 Gigabit
+sudo ./proxmox-update-policy.sh enable       # Enable with UI patches
+sudo ./proxmox-update-policy.sh enable --no-ui  # Enable without UI patches
+sudo ./proxmox-update-policy.sh disable      # Disable and restore UI
+sudo ./proxmox-update-policy.sh status       # Show policy and versions
+sudo ./proxmox-update-policy.sh update       # Refresh pinning
+sudo ./proxmox-update-policy.sh cron-enable  # Install daily cron
+sudo ./proxmox-update-policy.sh cron-disable # Remove cron
 ```
 
-**Network Tier Optimizations**:
+**UI customisations:**
 
-| Tier | TCP Buffer Max | Backlog | Congestion | Ring Buffer | Use Case |
-|------|---------------|---------|------------|-------------|----------|
-| 1 GbE | 8 MB | 5K | CUBIC | 512 | Small deployments |
-| 10 GbE | 32 MB | 30K | BBR | 2048 | Standard |
-| 25 GbE | 64 MB | 50K | BBR | 4096 | High-speed |
-| 40 GbE | 128 MB | 100K | BBR | 8192 | Very high-speed |
-| 100 GbE | 256 MB | 250K | BBR | 8192 | Very high-speed |
-| 200 GbE | 512 MB | 500K | BBR | 8192 | Very high-speed |
+When enabled, modifies the Proxmox web interface:
 
-**Created Commands**:
-- `network-status` - Current network configuration and statistics
-- `network-test` - Performance testing guide
+- Replaces "not recommended for production" with "Conservative update policy active"
+- Changes warning icons to green success indicators
+- Persists across package updates via APT hook
 
-**Key Parameters Applied**:
-```
-net.core.rmem_max          # Maximum receive buffer
-net.core.wmem_max          # Maximum send buffer
-net.ipv4.tcp_rmem          # TCP receive buffer (min/default/max)
-net.ipv4.tcp_wmem          # TCP send buffer (min/default/max)
-net.core.netdev_max_backlog    # Network queue depth
-net.ipv4.tcp_congestion_control # BBR or CUBIC
-```
+**Compatibility:** Tested on PVE 9.x only. PVE 8.x may work.
 
-**Additional Optimizations**:
-- Hardware offloading (TSO, GSO, GRO)
-- Interrupt coalescing for 10GbE+
-- TCP window scaling
-- TCP timestamps and SACK
-- Connection tracking limits
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | No |
+| Backup | `/root/backup/proxmox-config/` |
 
 ---
 
-### `proxmox-optimize.sh`
-**Purpose**: Core system configuration
+### proxmox-optimize.sh
 
-**What it does**:
-- [1/7] Backup current system settings
-- [2/7] Install monitoring tools
-- [3/7] Configure kernel parameters (sysctl)
-- [4/7] Enable nested virtualization
-- [5/7] Configure IOMMU for device passthrough
-- [6/7] Enable SSD TRIM
-- [7/7] Create management scripts
+Core system configuration for Proxmox VE hosts.
 
-**Idempotent**: Yes
-**Requires Reboot**: Yes (for IOMMU/nested virt)
-**Backup Location**: `/root/backup`
+**What it does:**
 
-**Created Commands**:
-- `proxmox-status` - System status overview
+- Backs up current settings
+- Installs monitoring tools (htop, iotop, smartmontools)
+- Configures kernel parameters (sysctl)
+- Enables nested virtualisation (Intel VT-x / AMD-V)
+- Configures IOMMU for device passthrough
+- Enables SSD TRIM
+- Creates management scripts
 
-**Kernel Parameters Applied**:
-```
+**Kernel parameters applied:**
+
+```text
 vm.swappiness=10
 vm.vfs_cache_pressure=50
 net.core.netdev_max_backlog=8192
@@ -212,214 +141,287 @@ fs.file-max=2097152
 net.bridge.bridge-nf-call-iptables=1
 ```
 
+**Created commands:** `proxmox-status`
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | Yes (for IOMMU/nested virt) |
+| Backup | `/root/backup/proxmox-config/` |
+
 ---
 
-### `proxmox-power-management.sh`
-**Purpose**: Power management and thermal control
+### proxmox-network.sh
 
-**What it does**:
-- [1/8] Configure CPU frequency governor (schedutil)
-- [2/8] Apply vendor-specific configuration (Intel/AMD)
-- [3/8] Enable PCIe ASPM (powersave mode)
-- [4/8] Configure SATA link power management
-- [5/8] Enable network power management (WoL, EEE)
-- [6/8] Configure USB selective suspend
-- [7/8] Enable PCI runtime power management
-- [8/8] Update kernel boot parameters
+Network configuration based on interface speed tier.
 
-**Idempotent**: Yes
-**Requires Reboot**: Yes (for kernel parameters)
-**Backup Location**: `/root/power-backup-YYYYMMDD`
+**Usage:**
 
-**Created Commands**:
-- `power-status` - Current power state
-- `thermal-check` - CPU temperature and frequency
-- `performance-mode` - Very high-speed
-- `balanced-mode` - Default balanced settings
-- `powersave-mode` - Power saving mode
-
-**Systemd Service**: `proxmox-power.service` (auto-applies on boot)
-
-**Kernel Parameters Applied** (Intel):
+```bash
+sudo ./proxmox-network.sh 1gbe     # 1 Gigabit (conservative)
+sudo ./proxmox-network.sh 10gbe    # 10 Gigabit (recommended)
+sudo ./proxmox-network.sh 25gbe    # 25 Gigabit
+sudo ./proxmox-network.sh 40gbe    # 40 Gigabit
+sudo ./proxmox-network.sh 100gbe   # 100 Gigabit
+sudo ./proxmox-network.sh 200gbe   # 200 Gigabit
 ```
+
+**What it does:**
+
+- Detects or accepts network speed tier
+- Configures TCP/UDP buffer sizes
+- Configures queue depths and backlogs
+- Enables BBR congestion control for 10GbE+
+- Configures NIC ring buffers and hardware offloading
+- Supports jumbo frames (--jumbo flag)
+
+**Tier optimisations:**
+
+| Tier | TCP Buffer Max | Backlog | Congestion | Ring Buffer |
+|------|---------------|---------|------------|-------------|
+| 1 GbE | 8 MB | 5K | CUBIC | 512 |
+| 10 GbE | 32 MB | 30K | BBR | 2048 |
+| 25 GbE | 64 MB | 50K | BBR | 4096 |
+| 40 GbE | 128 MB | 100K | BBR | 8192 |
+| 100 GbE | 256 MB | 250K | BBR | 8192 |
+| 200 GbE | 512 MB | 500K | BBR | 8192 |
+
+**Created commands:** `network-status`, `network-test`
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | No |
+| Backup | `/root/backup/proxmox-config/` |
+
+---
+
+### proxmox-power-management.sh
+
+Power management and thermal control.
+
+**What it does:**
+
+- Configures CPU frequency governor (schedutil)
+- Applies vendor-specific settings (Intel/AMD)
+- Enables PCIe ASPM (powersave mode)
+- Configures SATA link power management
+- Enables network power management (WoL, EEE)
+- Configures USB selective suspend
+- Enables PCI runtime power management
+- Updates kernel boot parameters
+
+**Kernel parameters (Intel):**
+
+```text
 intel_idle.max_cstate=6
 intel_pstate=passive
 pcie_aspm=powersave
 ```
 
-**Kernel Parameters Applied** (AMD):
-```
+**Kernel parameters (AMD):**
+
+```text
 processor.max_cstate=6
 amd_pstate=passive
 pcie_aspm=powersave
 ```
 
+**Created commands:** `power-status`, `thermal-check`, `performance-mode`, `balanced-mode`, `powersave-mode`
+
+**Systemd service:** `proxmox-power.service` (auto-applies on boot)
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | Yes (for kernel parameters) |
+| Backup | `/root/backup/proxmox-config/` |
+
 ---
 
-### `proxmox-zfs.sh`
-**Purpose**: Safe ZFS optimization for Proxmox storage
+### proxmox-zfs.sh
 
-**What it does**:
-- Calculate ARC size based on total RAM
-- Apply runtime ARC limits
-- Create persistent ZFS module configuration
-- Enable autotrim on all pools
-- Optimize VM storage datasets (atime, xattr)
-- Generate status and tuning scripts
+Safe ZFS optimisation for Proxmox storage.
 
-**Idempotent**: Yes
-**Requires Reboot**: Recommended
-**Backup Location**: None (safe operations)
+**What it does:**
 
-**ARC Sizing Strategy**:
+- Calculates ARC size based on total RAM
+- Applies runtime ARC limits
+- Creates persistent ZFS module configuration
+- Enables autotrim on all pools
+- Optimises VM storage datasets (atime, xattr)
+- Generates status and tuning scripts
+
+**ARC sizing:**
+
 | Total RAM | ARC Min | ARC Max | VM Reserve |
 |-----------|---------|---------|------------|
-| 16 GB     | 1 GB    | 2 GB    | 14+ GB     |
-| 32 GB     | 1 GB    | 3 GB    | 29+ GB     |
-| 64 GB     | 2 GB    | 4 GB    | 60+ GB     |
-| 128 GB    | 2 GB    | 6 GB    | 122+ GB    |
-| 256+ GB   | 3 GB    | 8 GB    | 248+ GB    |
+| 16 GB | 1 GB | 2 GB | 14+ GB |
+| 32 GB | 1 GB | 3 GB | 29+ GB |
+| 64 GB | 2 GB | 4 GB | 60+ GB |
+| 128 GB | 2 GB | 6 GB | 122+ GB |
+| 256+ GB | 3 GB | 8 GB | 248+ GB |
 
-**Created Commands**:
-- `zfs-status` - ZFS status
-- `zfs-tune-guide` - Tuning recommendations
+**Safety settings preserved:** `sync=standard`, `compression` (Proxmox-managed), `primarycache=all`
 
-**Safety Settings Preserved**:
-- `sync=standard` - Prevents data loss
-- `compression` - Proxmox-managed per-volume
-- `primarycache=all` - Full caching for performance
+**Created commands:** `zfs-status`, `zfs-tune-guide`
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | Recommended |
+| Backup | None (safe operations) |
+
+---
+
+### proxmox-internal-nat.sh
+
+Host-side internal VM network with NAT outbound.
+
+**Usage:**
+
+```bash
+sudo ./proxmox-internal-nat.sh apply --lan-cidr 10.42.0.0/16
+sudo ./proxmox-internal-nat.sh remove
+sudo ./proxmox-internal-nat.sh status --lan-cidr 10.42.0.0/16
+sudo ./proxmox-internal-nat.sh health --lan-cidr 10.42.0.0/16
+```
+
+**Commands:**
+
+- `apply` - Create internal bridge, enable forwarding, add NAT rules
+- `remove` - Remove all configuration and rules
+- `status` - Show CONFIG intent vs LIVE runtime state
+- `health` - Deeper dataplane checks (routes + nft rules/counters)
+
+**Options:**
+
+- `--lan-cidr <CIDR>` - Network CIDR (required for apply/status/health)
+- `--lan-gw <IP>` - Gateway IP (default: first usable host)
+- `--wan-bridge <name>` - WAN bridge name (default: vmbr0)
+- `--lan-bridge <name>` - LAN bridge name (default: vmbr1)
+- `--reload` - Reload networking after changes
+
+**Safety:**
+
+- Does NOT reload networking unless `--reload` is passed
+- Uses isolated nftables tables (won't conflict with pve-firewall)
+- All files backed up before modification
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | No |
+| Backup | Inline (marked sections) |
 
 ---
 
 ## Configuration Files
 
-### Created/Modified System Files
+### Created/Modified
 
-```
+```text
 /etc/sysctl.d/99-proxmox-optimize.conf       # Kernel parameters
-/etc/modprobe.d/kvm-nested.conf              # Nested virtualization
+/etc/modprobe.d/kvm-nested.conf              # Nested virtualisation
 /etc/modprobe.d/zfs.conf                     # ZFS ARC limits
 /etc/modules                                 # VFIO modules
 /etc/default/grub                            # Boot parameters
 /etc/default/cpufrequtils                    # CPU governor
 /etc/systemd/system/proxmox-power.service    # Power service
 /etc/apt/sources.list.d/debian.sources       # Proxmox repos
+/etc/apt/preferences.d/proxmox-conservative  # Update policy pinning
+/etc/apt/apt.conf.d/99proxmoxpolicy          # Update policy APT hook
+/usr/local/bin/proxmox-policy-hook.sh        # Update policy hook script
+/usr/share/pve-manager/js/conservative-policy.js  # UI policy flag
 ```
 
 ### Backup Locations
 
-```
-/root/backup/                     # proxmox-optimize.sh backups
-  ├── sysctl-backup-*.conf
-  └── grub.backup.*
+All backups are stored in `/root/backup/proxmox-config/` with timestamped filenames:
 
-/root/power-backup-YYYYMMDD/      # Power management backups
-  ├── grub
-  ├── cpufrequtils
-  └── modules-load.d/
+```text
+/root/backup/proxmox-config/
+  - sysctl-backup-YYYYMMDD_HHMMSS.conf      # System
+  - grub.backup.YYYYMMDD_HHMMSS             # System
+  - network-sysctl-YYYYMMDD_HHMMSS.conf     # Network
+  - power-grub-YYYYMMDD_HHMMSS              # Power
+  - power-cpufrequtils-YYYYMMDD_HHMMSS      # Power
+  - proxmoxlib.js.original                  # Update policy
+  - pvemanagerlib.js.original               # Update policy
+  - index.html.tpl.original                 # Update policy
 ```
 
 ---
 
 ## Management Commands
 
-After installation, the following commands are available:
+After installation, these commands are available:
 
-### System Status
 ```bash
-proxmox-status      # Overall system status
-                    # - Temperature sensors
-                    # - Nested virtualization
-                    # - IOMMU status
-                    # - Memory usage
-                    # - VM/Container counts
-```
+# System
+proxmox-status              # Overall system status
 
-### Network Status
-```bash
-network-status      # Network configuration status
-                    # - Configured GbE tier
-                    # - TCP congestion control
-                    # - Buffer sizes
-                    # - Queue depths
-                    # - Interface speeds and states
+# Network
+network-status              # Network configuration
+network-test                # Performance testing guide
 
-network-test        # Performance testing guide
-                    # - iperf3 usage
-                    # - Latency testing
-                    # - Bandwidth measurement
-```
+# Power
+power-status                # Power configuration
+thermal-check               # CPU temperature check
+performance-mode            # Switch to performance
+balanced-mode               # Switch to balanced
+powersave-mode              # Switch to powersave
 
-### Power Management
-```bash
-power-status        # Power configuration status
-                    # - CPU governor and driver
-                    # - CPU frequencies
-                    # - Temperature
-                    # - PCIe ASPM status
-                    # - Turbo/Boost status
+# ZFS
+zfs-status                  # ZFS status overview
+zfs-tune-guide              # Tuning recommendations
 
-thermal-check       # Detailed thermal check
-                    # - Max CPU temperature
-                    # - Threshold warnings
-                    # - Current frequencies
-                    # - Throttling indicators
-
-performance-mode    # Switch to performance mode
-balanced-mode       # Switch to balanced mode
-powersave-mode      # Switch to powersave mode
-```
-
-### ZFS Management
-```bash
-zfs-status          # ZFS status overview
-                    # - ARC memory usage
-                    # - Hit ratio
-                    # - Pool health
-                    # - Fragmentation
-                    # - VM volume settings
-
-zfs-tune-guide      # Optimization guide
-                    # - Applied settings
-                    # - Proxmox-managed settings
-                    # - Safety information
-                    # - Advanced tuning options
+# Update Policy
+proxmox-update-policy.sh status   # Policy status
+proxmox-update-policy.sh enable   # Enable policy
+proxmox-update-policy.sh disable  # Disable policy
+proxmox-update-policy.sh update   # Refresh pinning
 ```
 
 ---
 
-## Safety & Idempotency
+## Safety
 
 ### Idempotent Design
-All scripts are **fully idempotent** - safe to run multiple times:
+
+All scripts are safe to run multiple times:
+
 - Check current state before applying changes
 - Skip already-configured settings
-- Provide clear status messages (Already configured vs Newly configured)
+- Clear status messages (Already configured vs Newly configured)
 
 ### Data Safety
-- **No data loss risk** - All optimizations preserve data integrity
-- **Automatic backups** - System configs backed up before changes
-- **Conservative defaults** - Settings favor reliability over performance
-- **Proxmox-aware** - Respects Proxmox's management of VMs and storage
+
+- No data loss risk - all optimisations preserve data integrity
+- Automatic backups - system configs backed up before changes
+- Conservative defaults - reliability over performance
+- Proxmox-aware - respects Proxmox's management of VMs and storage
 
 ### Error Handling
+
 - Error trapping (`set -e`, `trap`)
 - Graceful degradation on non-critical failures
 - Detailed error messages with line numbers
-- Continues on non-blocking errors
 
 ---
 
-## CPU Vendor Support
+## CPU Support
 
 ### Intel
-- Intel VT-x nested virtualization
+
+- Intel VT-x nested virtualisation
 - Intel IOMMU (VT-d)
 - Intel P-state driver
 - Intel Turbo Boost control
 
 ### AMD
-- AMD-V nested virtualization
+
+- AMD-V nested virtualisation
 - AMD IOMMU (AMD-Vi)
 - AMD P-state driver (EPP mode)
 - AMD Core Performance Boost
@@ -428,166 +430,99 @@ All scripts are **fully idempotent** - safe to run multiple times:
 
 ## Compatibility
 
-### Tested On
-- Proxmox VE 9.x
-- Debian 13 (Trixie)
+**Tested on:**
+
+- Proxmox VE 9.x / Debian 13 (Trixie) only
+- PVE 8.x may work but is untested
 - Intel Xeon, Core i-series CPUs
 - AMD EPYC, Ryzen CPUs
 
-### Hardware Requirements
-- x86_64 CPU with virtualization extensions (Intel VT-x / AMD-V)
+**Requirements:**
+
+- x86_64 CPU with virtualisation extensions (Intel VT-x / AMD-V)
 - IOMMU support (Intel VT-d / AMD-Vi) for device passthrough
 - lm-sensors compatible CPU for thermal monitoring
-
-### Optional Features
-- ZFS support (for zfs optimization script)
-- NVMe/SATA SSD (for TRIM optimization)
-- Multiple CPU cores (for power management benefits)
 
 ---
 
 ## Troubleshooting
 
 ### Script Won't Run
+
 ```bash
-# Ensure root permissions
-sudo -i
-
-# Make scripts executable
+sudo -i                    # Ensure root
 chmod +x /path/to/script.sh
-
-# Check Proxmox version
-pveversion
+pveversion                 # Check Proxmox version
 ```
 
 ### IOMMU Not Enabled
+
 ```bash
-# Check if enabled in GRUB
 grep GRUB_CMDLINE_LINUX_DEFAULT /etc/default/grub
-
-# Update GRUB and reboot
-update-grub
-reboot
-
-# Verify after reboot
-dmesg | grep -i iommu
+update-grub && reboot
+dmesg | grep -i iommu      # Verify after reboot
 ```
 
 ### Power Management Not Working
+
 ```bash
-# Check if CPU frequency scaling is available
 ls /sys/devices/system/cpu/cpu0/cpufreq/
-
-# Load required modules
-modprobe acpi-cpufreq   # or amd-pstate / intel_pstate
-
-# Check systemd service
+modprobe acpi-cpufreq      # or amd-pstate / intel_pstate
 systemctl status proxmox-power.service
 ```
 
 ### ZFS Script Fails
+
 ```bash
-# Verify ZFS is installed
-zpool list
-
-# Check if running as root
-whoami
-
-# Verify ZFS modules loaded
-lsmod | grep zfs
+zpool list                 # Verify ZFS installed
+whoami                     # Check root
+lsmod | grep zfs           # Verify modules loaded
 ```
 
 ### Temperature Sensors Not Working
+
 ```bash
-# Install lm-sensors
 apt-get install lm-sensors
-
-# Detect sensors
 sensors-detect --auto
-
-# Test reading
 sensors
 ```
 
 ---
 
-## Semantic Versioning
+## Versioning
 
-This project follows [Semantic Versioning 2.0.0](https://semver.org/):
+This project uses [Semantic Versioning](https://semver.org/):
 
-- **MAJOR** version for incompatible API/script changes
-- **MINOR** version for backwards-compatible functionality additions
-- **PATCH** version for backwards-compatible bug fixes
+- **MAJOR** - Incompatible changes
+- **MINOR** - Backwards-compatible additions
+- **PATCH** - Backwards-compatible fixes
 
-
-See [CHANGELOG.md](CHANGELOG.md) for version history.
-
----
-
-## Character & Emoji Policy
-
-This project follows a strict character policy for compatibility:
-
-### Console Output (Permitted)
-- SUCCESS: OK
-- ERROR: ERROR
-- WARNING: WARNING
-- INFO: INFO
-- PENDING: 
-- DONE: OK
-- STEP: 
-
-### Log Files (ASCII Only)
-All logged output uses plain ASCII characters for compatibility with:
-- Log shippers and aggregators
-- Parsing tools and scripts
-- Archival systems
-
-See the character policy documentation for full details.
+See [CHANGELOG.md](CHANGELOG.md) for history.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) guide for details on:
-
-- Code of conduct
-- Development guidelines
-- Coding standards
-- Testing requirements
-- Commit message format
-- Pull request process
-- Character & emoji policy
+Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 Quick checklist:
-1. All scripts remain idempotent
-2. Follow existing error handling patterns
-3. Test on Proxmox VE 9.x
-4. Update documentation and CHANGELOG
-5. Follow semantic versioning
-6. Adhere to character policy for output
-7. Pass ShellCheck linting
+
+- Scripts remain idempotent
+- Follow existing error handling patterns
+- Test on Proxmox VE 9.x
+- Update documentation
+- Pass ShellCheck
 
 ---
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+Apache License 2.0 - see [LICENSE](LICENSE).
 
-```
+```text
 Copyright 2025 HyperSec
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Licensed under the Apache License, Version 2.0
 ```
 
 ---
@@ -595,10 +530,10 @@ limitations under the License.
 ## Disclaimer
 
 These scripts modify system configuration. While designed to be safe and idempotent:
-- Always test in a non-production environment first
-- Review the code before running on production systems
+
+- Test in non-production first
+- Review code before running on production
 - Ensure you have backups
-- The authors are not responsible for any system issues
 
 **Use at your own risk.**
 
@@ -608,15 +543,11 @@ These scripts modify system configuration. While designed to be safe and idempot
 
 - Issues: [GitHub Issues](https://github.com/hypersec-io/proxmox/issues)
 - Documentation: This README and inline script comments
-- Community: Proxmox Forums, r/Proxmox
 
 ---
 
 ## Acknowledgments
 
-- Proxmox VE Team for the virtualization platform
-- Debian Project for the stable base system
-- Community contributors and testers
-
----
-
+- Proxmox VE Team
+- Debian Project
+- Community contributors
