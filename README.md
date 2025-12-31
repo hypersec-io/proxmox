@@ -16,6 +16,7 @@ Idempotent scripts for Proxmox VE post-installation configuration. Brought to yo
 - **Repository Config** - No-subscription repos, enterprise repo disable
 - **Conservative Updates** - N-1 minor version pinning, UI customisation, APT persistence hooks
 - **Internal NAT** - Host-side VM networking with any IPv4 CIDR
+- **Remote Access** - AWS SSM and NetBird agents for emergency console access
 
 ---
 
@@ -25,7 +26,7 @@ Idempotent scripts for Proxmox VE post-installation configuration. Brought to yo
 # Download and extract
 wget https://github.com/hypersec-io/proxmox/archive/refs/heads/main.zip
 unzip main.zip && cd proxmox-main/postinstall
-chmod +x *.sh
+chmod +x *.sh *.py
 
 # Run in order
 sudo ./proxmox-repo.sh              # Configure repositories
@@ -316,6 +317,109 @@ sudo ./proxmox-internal-nat.sh health --lan-cidr 10.42.0.0/16
 
 ---
 
+### proxmox-ssm.py
+
+AWS Systems Manager agent for emergency console access via AWS SSM Session Manager.
+
+**Usage:**
+
+```bash
+# Install with auto-created IAM role and activation
+sudo ./proxmox-ssm.py install --region ap-southeast-2
+
+# Install with existing activation
+sudo ./proxmox-ssm.py install --activation-code XXXX --activation-id YYYY --region ap-southeast-2
+
+# Check status
+sudo ./proxmox-ssm.py status
+
+# Uninstall
+sudo ./proxmox-ssm.py uninstall
+```
+
+**What it does:**
+
+- Installs AWS SSM agent from official .deb package
+- Creates IAM role with SSM trust policy (if not exists)
+- Creates hybrid activation for on-premises registration
+- Registers host as AWS managed instance
+- Enables Session Manager access via AWS console/CLI
+
+**Region auto-detection (in order):**
+
+1. `--region` flag
+2. `AWS_REGION` environment variable
+3. `AWS_DEFAULT_REGION` environment variable
+4. `aws configure get region`
+5. Error if none found
+
+**Requirements:**
+
+- AWS CLI installed with appropriate IAM permissions
+- Internet connectivity to AWS SSM endpoints
+- For Session Manager: Advanced-instances tier enabled
+
+**Connect after install:**
+
+```bash
+aws ssm start-session --target mi-XXXXXXXXX --region ap-southeast-2
+```
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | No |
+| Backup | `/root/backup/proxmox-config/` |
+
+---
+
+### proxmox-netbird.py
+
+NetBird WireGuard mesh agent for emergency access. BSD-3-Clause licensed open source.
+
+**Usage:**
+
+```bash
+# Install and connect to NetBird cloud
+sudo ./proxmox-netbird.py install --setup-key nb-setup-XXXXXXXX
+
+# Install and connect to self-hosted control plane
+sudo ./proxmox-netbird.py install --setup-key XXXX --management-url https://netbird.example.com:443
+
+# Check status
+sudo ./proxmox-netbird.py status
+
+# Uninstall
+sudo ./proxmox-netbird.py uninstall
+```
+
+**What it does:**
+
+- Adds NetBird APT repository
+- Installs netbird package
+- Connects to management server with setup key
+- Creates WireGuard tunnel (wt0 interface)
+
+**Getting a setup key:**
+
+1. Go to <https://app.netbird.io> (or your self-hosted console)
+2. Navigate to Setup Keys
+3. Create a new key (reusable or one-time)
+4. Use with `--setup-key`
+
+**Supports:**
+
+- NetBird cloud (api.netbird.io) - default
+- Self-hosted control plane (`--management-url`)
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | No |
+| Backup | `/root/backup/proxmox-config/` |
+
+---
+
 ## Configuration Files
 
 ### Created/Modified
@@ -381,6 +485,10 @@ proxmox-update-policy.sh status   # Policy status
 proxmox-update-policy.sh enable   # Enable policy
 proxmox-update-policy.sh disable  # Disable policy
 proxmox-update-policy.sh update   # Refresh pinning
+
+# Remote Access
+proxmox-ssm.py status             # SSM agent status
+proxmox-netbird.py status         # NetBird status
 ```
 
 ---
