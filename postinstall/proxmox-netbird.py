@@ -49,9 +49,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-from urllib.request import urlopen, Request
 from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 
 # ANSI colors
@@ -98,7 +97,7 @@ DEFAULT_MANAGEMENT_URL = "https://api.netbird.io:443"
 
 @dataclass
 class Config:
-    setup_key: Optional[str] = None
+    setup_key: str | None = None
     management_url: str = DEFAULT_MANAGEMENT_URL
 
 
@@ -227,20 +226,9 @@ def add_apt_repository() -> None:
     result = run_cmd(["dpkg", "--print-architecture"])
     arch = result.stdout.strip()
 
-    # Get distribution codename
-    result = run_cmd(["lsb_release", "-cs"], check=False)
-    if result.returncode == 0:
-        codename = result.stdout.strip()
-    else:
-        # Fallback: read from os-release
-        codename = "stable"
-        try:
-            for line in Path("/etc/os-release").read_text().splitlines():
-                if line.startswith("VERSION_CODENAME="):
-                    codename = line.split("=", 1)[1].strip().strip('"')
-                    break
-        except OSError:
-            pass
+    # No codename detection: the NetBird repository is single-suite and serves
+    # every Debian release from "stable". Deriving a codename here would only
+    # produce a suite that does not exist.
 
     # Write sources file (deb822 format)
     apt_source_content = f"""Types: deb
@@ -285,7 +273,8 @@ def configure_netbird(config: Config) -> None:
     result = run_cmd(cmd, timeout=120, check=False)
 
     if result.returncode != 0:
-        if "already connected" in result.stderr.lower() or "already connected" in result.stdout.lower():
+        combined = f"{result.stderr}{result.stdout}".lower()
+        if "already connected" in combined:
             ok("NetBird already connected")
             return
         error(f"Failed to connect: {result.stderr or result.stdout}")
@@ -434,7 +423,10 @@ def cmd_install(config: Config) -> None:
         if wait_for_connection():
             ok("NetBird connection established")
         else:
-            warn("Connection may still be establishing. Check status with: proxmox-netbird.py status")
+            warn(
+                "Connection may still be establishing. "
+                "Check status with: proxmox-netbird.py status"
+            )
     else:
         info("No setup key provided. NetBird is installed but not connected.")
         info("Connect with: netbird up --setup-key <YOUR_SETUP_KEY>")

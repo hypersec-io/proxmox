@@ -1,15 +1,15 @@
 {
   "name": "proxmox-postinstall-toolkit",
-  "version": "2.1.0",
   "description": "Idempotent scripts for configuring Proxmox VE installations",
+  "private": true,
   "scripts": {
-    "lint": "shellcheck -x *.sh",
-    "test": "bash -n *.sh && shellcheck -x *.sh",
+    "lint": "shellcheck -x *.sh ../tests/*.sh",
+    "test": "bash -n *.sh ../tests/*.sh && shellcheck -x *.sh ../tests/*.sh && ../tests/test-update-policy.sh && ../tests/test-disk-errors.sh && ../tests/test-cleanup.sh && ../tests/test-apt-pinning.sh",
     "semantic-release": "semantic-release"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/proxmox-postinstall.git"
+    "url": "https://github.com/hyperi-io/proxmox.git"
   },
   "keywords": [
     "proxmox",
@@ -24,17 +24,17 @@
   "author": "HyperSec",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/yourusername/proxmox-postinstall/issues"
+    "url": "https://github.com/hyperi-io/proxmox/issues"
   },
-  "homepage": "https://github.com/yourusername/proxmox-postinstall#readme",
+  "homepage": "https://github.com/hyperi-io/proxmox#readme",
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/commit-analyzer": "^11.1.0",
+    "@semantic-release/commit-analyzer": "^13.0.0",
     "@semantic-release/exec": "^6.0.3",
     "@semantic-release/git": "^10.0.1",
-    "@semantic-release/github": "^9.2.6",
-    "@semantic-release/release-notes-generator": "^12.1.0",
-    "semantic-release": "^23.0.0"
+    "@semantic-release/github": "^10.0.0",
+    "@semantic-release/release-notes-generator": "^14.0.0",
+    "semantic-release": "^24.0.0"
   },
   "engines": {
     "node": ">=18"

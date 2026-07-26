@@ -324,6 +324,19 @@ echo -e "${CYAN}Max TCP Buffer: $(( RMEM_MAX / 1024 / 1024 )) MB${NC}\n"
 #############################################
 echo -e "${YELLOW} [1/5] Configuring kernel network parameters...${NC}"
 
+# Remove any previously-applied tier before writing this one. sysctl.d applies
+# EVERY file in the directory, so a leftover tier does not become inert when a
+# new one is written -- both apply, and which one wins is decided by filename
+# sort rather than by the tier just chosen. "1gbe" sorts after "10gbe", so a
+# host moved from 1gbe to 10gbe silently keeps the 1gbe buffers.
+for _stale in /etc/sysctl.d/99-proxmox-network-*.conf; do
+    [ -e "$_stale" ] || continue
+    [ "$_stale" = "/etc/sysctl.d/99-proxmox-network-${TIER}.conf" ] && continue
+    mv "$_stale" "${BACKUP_DIR}/$(basename "$_stale").replaced-$(date +%Y%m%d_%H%M%S)"
+    echo -e "${YELLOW}Removed stale tier file: $(basename "$_stale")${NC}"
+done
+unset _stale
+
 cat > "/etc/sysctl.d/99-proxmox-network-${TIER}.conf" << EOF
 # Proxmox Network Configuration - ${TIER_NAME}
 # Generated: $(date)
@@ -569,8 +582,8 @@ EOF
 chmod +x /usr/local/bin/network-test
 
 echo -e "${GREEN}OK Monitoring scripts created${NC}"
-echo "  • network-status - Check current configuration"
-echo "  • network-test   - Performance testing guide"
+echo "  - network-status - Check current configuration"
+echo "  - network-test   - Performance testing guide"
 
 #############################################
 # Summary
@@ -580,59 +593,59 @@ echo -e "\n${YELLOW} [5/5] Creating configuration summary...${NC}\n"
 echo -e "${GREEN}=== Network Configuration Complete ===${NC}"
 echo ""
 echo -e "${BLUE}Configuration:${NC}"
-echo "  • Tier: ${TIER_NAME}"
-echo "  • TCP Congestion: ${CONGESTION_CONTROL}"
-echo "  • Max RX Buffer: $(( RMEM_MAX / 1024 / 1024 )) MB"
-echo "  • Max TX Buffer: $(( WMEM_MAX / 1024 / 1024 )) MB"
-echo "  • Queue Backlog: ${NETDEV_MAX_BACKLOG}"
-echo "  • Ring Buffer: RX=${RING_RX} TX=${RING_TX}"
+echo "  - Tier: ${TIER_NAME}"
+echo "  - TCP Congestion: ${CONGESTION_CONTROL}"
+echo "  - Max RX Buffer: $(( RMEM_MAX / 1024 / 1024 )) MB"
+echo "  - Max TX Buffer: $(( WMEM_MAX / 1024 / 1024 )) MB"
+echo "  - Queue Backlog: ${NETDEV_MAX_BACKLOG}"
+echo "  - Ring Buffer: RX=${RING_RX} TX=${RING_TX}"
 echo ""
 
 echo -e "${CYAN}Available Commands:${NC}"
-echo "  • network-status - View current network configuration"
-echo "  • network-test   - Performance testing guide"
+echo "  - network-status - View current network configuration"
+echo "  - network-test   - Performance testing guide"
 echo ""
 
 echo -e "${CYAN}Performance Tips:${NC}"
 if [ "$ENABLE_JUMBO" == "true" ]; then
-    echo "  • Jumbo Frames ENABLED - verify all network equipment supports MTU 9000"
-    echo "  • Check switch, router, and NIC configuration"
-    echo "  • Test connectivity: ping -M do -s 8972 <host>"
+    echo "  - Jumbo Frames ENABLED - verify all network equipment supports MTU 9000"
+    echo "  - Check switch, router, and NIC configuration"
+    echo "  - Test connectivity: ping -M do -s 8972 <host>"
 else
-    echo "  • Consider Jumbo Frames for 10GbE+ (rerun with --jumbo flag)"
-    echo "  • Requires switch and all network equipment to support MTU 9000"
+    echo "  - Consider Jumbo Frames for 10GbE+ (rerun with --jumbo flag)"
+    echo "  - Requires switch and all network equipment to support MTU 9000"
 fi
 if [[ "$TIER" != "1gbe" && "$TIER" != "1g" ]]; then
-    echo "  • Ensure all network equipment supports ${TIER_NAME}"
-    echo "  • Use multiple queues/RSS for better multi-core performance"
+    echo "  - Ensure all network equipment supports ${TIER_NAME}"
+    echo "  - Use multiple queues/RSS for better multi-core performance"
 fi
-echo "  • Monitor with: iftop, nload, bmon, or ss -s"
-echo "  • Test with: iperf3 for bandwidth, ping for latency"
+echo "  - Monitor with: iftop, nload, bmon, or ss -s"
+echo "  - Test with: iperf3 for bandwidth, ping for latency"
 echo ""
 
 echo -e "${YELLOW}Recommendations for ${TIER_NAME}:${NC}"
 case "$TIER" in
     1gbe|1g)
-        echo "  • Suitable for: Small deployments, management traffic"
-        echo "  • Consider: Link aggregation (bonding) for HA"
+        echo "  - Suitable for: Small deployments, management traffic"
+        echo "  - Consider: Link aggregation (bonding) for HA"
         ;;
     10gbe|10g)
-        echo "  • Suitable for: Most production environments"
-        echo "  • Consider: Dedicated storage network on separate NIC"
-        echo "  • Recommended: Enable Jumbo Frames"
+        echo "  - Suitable for: Most production environments"
+        echo "  - Consider: Dedicated storage network on separate NIC"
+        echo "  - Recommended: Enable Jumbo Frames"
         ;;
     25gbe|25g|40gbe|40g)
-        echo "  • Suitable for: High-performance clusters"
-        echo "  • Required: Switch with matching capabilities"
-        echo "  • Recommended: Jumbo Frames, RDMA if available"
-        echo "  • Consider: SR-IOV for VM network performance"
+        echo "  - Suitable for: High-performance clusters"
+        echo "  - Required: Switch with matching capabilities"
+        echo "  - Recommended: Jumbo Frames, RDMA if available"
+        echo "  - Consider: SR-IOV for VM network performance"
         ;;
     100gbe|100g|200gbe|200g)
-        echo "  • Suitable for: Very high-speed networks, large-scale deployments"
-        echo "  • Required: Specialized NICs and switches"
-        echo "  • Recommended: RDMA (RoCE v2), SR-IOV"
-        echo "  • Consider: Dedicated NUMA node affinity"
-        echo "  • Monitor: CPU usage, may need RSS tuning"
+        echo "  - Suitable for: Very high-speed networks, large-scale deployments"
+        echo "  - Required: Specialized NICs and switches"
+        echo "  - Recommended: RDMA (RoCE v2), SR-IOV"
+        echo "  - Consider: Dedicated NUMA node affinity"
+        echo "  - Monitor: CPU usage, may need RSS tuning"
         ;;
 esac
 

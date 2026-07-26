@@ -1,6 +1,0 @@
---- a/index.html.tpl
-+++ b/index.html.tpl
-@@ -1,2 +1,3 @@
-     <script type="text/javascript" src="/proxmoxlib.js?ver=[% wtversion %]"></script>
-+    <script type="text/javascript" src="/pve2/js/conservative-policy.js"></script>
-     <script type="text/javascript" src="/pve2/js/pvemanagerlib.js?ver=[% version %]"></script>

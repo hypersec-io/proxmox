@@ -11,18 +11,10 @@
       }
     ],
     [
-      "@semantic-release/exec",
-      {
-        "prepareCmd": "sed -i 's/Version: [0-9]\\+\\.[0-9]\\+\\.[0-9]\\+/Version: ${nextRelease.version}/g' postinstall/*.sh && sed -i 's/version-[0-9]\\+\\.[0-9]\\+\\.[0-9]\\+/version-${nextRelease.version}/g' README.md"
-      }
-    ],
-    [
       "@semantic-release/git",
       {
         "assets": [
-          "CHANGELOG.md",
-          "README.md",
-          "postinstall/*.sh"
+          "CHANGELOG.md"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }

@@ -1,5 +1,0 @@
---- a/pvemanagerlib.js
-+++ b/pvemanagerlib.js
-@@ -1 +1 @@
--                              'The no-subscription repository is not the best choice for production setups.',
-+                              Proxmox.Utils.conservativePolicyActive ? 'Conservative update policy active (latest patch, last minor release)' : 'The no-subscription repository is not the best choice for production setups.',

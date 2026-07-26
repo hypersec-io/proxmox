@@ -1,0 +1,8 @@
+# Repository classification -- declared, not inferred.
+#
+# Category 4 (OSS): public, Apache-2.0, publishes releases.
+#
+# Visibility flips, licence changes and any change to this classification are
+# human-only decisions and are never made by tooling or an agent.
+
+classification: oss

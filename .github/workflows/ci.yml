@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ShellCheck
+    runs-on: ${{ vars.GH_RUNNER_DEFAULT || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Syntax check
+        run: bash -n postinstall/*.sh tests/*.sh
+
+      - name: ShellCheck
+        run: shellcheck -x postinstall/*.sh tests/*.sh
+
+  python:
+    name: Python lint
+    runs-on: ${{ vars.GH_RUNNER_DEFAULT || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Compile check
+        run: python -m compileall -q postinstall/*.py
+
+      # Installed directly rather than via a third-party action: one less
+      # dependency to track, and the rule set is pinned in ruff.toml, so an
+      # unpinned ruff cannot turn CI red on its own.
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff
+        run: ruff check postinstall/
+
+  test:
+    name: Unit and integration tests
+    runs-on: ${{ vars.GH_RUNNER_DEFAULT || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # The version arithmetic behind the n-0.1 rule needs no Proxmox and no
+      # root -- the policy script is sourced and its pure functions driven
+      # directly. This is the gate that would have caught the 2026-07 bug.
+      - name: Update policy (n-0.1 rule)
+        run: ./tests/test-update-policy.sh
+
+      - name: Drive error-recovery detection
+        run: ./tests/test-disk-errors.sh
+
+      - name: Superseded-artefact detection
+        run: ./tests/test-cleanup.sh
+
+      # Parses the generated override with node: a syntax error there takes out
+      # the entire Proxmox web UI, since the browser aborts the script.
+      - name: UI override
+        run: ./tests/test-ui-override.sh
+
+      # Builds a throwaway apt repository and asserts on apt-cache policy, so
+      # "the pin holds" is proven against real apt rather than assumed.
+      - name: APT pinning behaviour
+        run: ./tests/test-apt-pinning.sh
