@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2](https://github.com/hyperi-io/proxmox/compare/v2.6.1...v2.6.2) (2026-07-26)
+
+
+### Bug Fixes
+
+* separate UI customisation from pinning, stop silent config loss ([#4](https://github.com/hyperi-io/proxmox/issues/4)) ([c85901f](https://github.com/hyperi-io/proxmox/commit/c85901f623e207142f0a52ec130643ef70d11393))
+
 ## [2.6.1](https://github.com/hyperi-io/proxmox/compare/v2.6.0...v2.6.1) (2026-07-26)
 
 
