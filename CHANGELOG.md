@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1](https://github.com/hyperi-io/proxmox/compare/v2.6.0...v2.6.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* correct update policy pinning and bound drive error recovery ([#3](https://github.com/hyperi-io/proxmox/issues/3)) ([99ac628](https://github.com/hyperi-io/proxmox/commit/99ac628cb5fcc42f74825dc23aed8114892abbc0))
+
 # [2.6.0](https://github.com/hypersec-io/proxmox/compare/v2.5.0...v2.6.0) (2025-12-31)
 
 
