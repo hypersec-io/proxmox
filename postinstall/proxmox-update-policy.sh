@@ -49,10 +49,18 @@
 # Commands:
 #   enable      - Enable conservative update policy (default)
 #   disable     - Disable policy and allow all updates
+#   ui-only     - Suppress subscription warnings WITHOUT pinning anything
+#   ui-disable  - Remove the UI customisation, leave pinning alone
 #   status      - Show current policy and pinned versions
 #   update      - Refresh pinning based on current repo state
 #   cron-enable - Install daily cron job to auto-update pinning
 #   cron-disable- Remove the cron job
+#
+# Pinning and the UI customisation are INDEPENDENT. A host can hold its
+# packages back, suppress the subscription warnings, both, or neither. They
+# were previously welded together -- the APT hook gated on the pinning file --
+# so a host that wanted latest packages silently got the warnings back with no
+# way to say otherwise.
 #
 # Requirements:
 #   - Proxmox VE
@@ -85,6 +93,13 @@ WIDGET_FILE="/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js"
 MANAGER_FILE="/usr/share/pve-manager/js/pvemanagerlib.js"
 INDEX_TPL="/usr/share/pve-manager/index.html.tpl"
 POLICY_JS="/usr/share/pve-manager/js/conservative-policy.js"
+
+# The served copy above lives in a pve-manager-owned directory, so a package
+# update can delete it. This is the master copy, outside anything dpkg manages:
+# it is both the marker that the customisation is installed and the source the
+# APT hook restores from.
+UI_STATE_DIR="/usr/local/share/proxmox-conservative"
+UI_STATE_JS="${UI_STATE_DIR}/conservative-policy.js"
 
 # Packages to pin, and how each of them is actually versioned.
 #
@@ -407,6 +422,11 @@ replace_once() {
 
 write_policy_js() {
     # The whole customisation, as an ExtJS override.
+    #
+    # Written to the master copy; install_policy_js puts it where pveproxy
+    # serves it from. Tests point POLICY_JS at a temporary path, so the two
+    # stay separate rather than one being derived from the other.
+    mkdir -p "$(dirname "$POLICY_JS")"
     cat > "$POLICY_JS" << 'POLICY_JS_EOF'
 // Conservative Update Policy - UI customisation
 // Installed by: proxmox-update-policy.sh
@@ -584,7 +604,11 @@ patch_ui() {
         [ -z "$quiet" ] && echo -e "${GREEN}OK Saved $INDEX_BACKUP${NC}"
     fi
 
-    write_policy_js
+    # Master copy first, then the served copy. A pve-manager update can delete
+    # the served one; the master survives and the APT hook restores from it.
+    mkdir -p "$UI_STATE_DIR"
+    POLICY_JS="$UI_STATE_JS" write_policy_js
+    install -m 0644 "$UI_STATE_JS" "$POLICY_JS"
     [ -z "$quiet" ] && echo -e "${GREEN}OK Wrote $POLICY_JS${NC}"
 
     if ensure_script_tag; then
@@ -610,6 +634,12 @@ unpatch_ui() {
     # Restore stock UI.
     local quiet="${1:-}"
     local restored=false
+
+    if [ -f "$UI_STATE_JS" ]; then
+        rm -f "$UI_STATE_JS"
+        rmdir "$UI_STATE_DIR" 2>/dev/null || true
+        restored=true
+    fi
 
     if [ -f "$POLICY_JS" ]; then
         rm -f "$POLICY_JS"
@@ -671,10 +701,13 @@ install_ui_hook() {
 
 INDEX_TPL="/usr/share/pve-manager/index.html.tpl"
 POLICY_JS="/usr/share/pve-manager/js/conservative-policy.js"
+UI_STATE_JS="/usr/local/share/proxmox-conservative/conservative-policy.js"
 ANCHOR='    <script type="text/javascript" src="/pve2/js/pvemanagerlib.js?ver=[% version %]"></script>'
 
-# Only act when the policy is actually enabled.
-[ -f "/etc/apt/preferences.d/proxmox-conservative" ] || exit 0
+# Gate on the UI customisation's OWN marker, not on the pinning file. The two
+# are independent: a host can suppress the subscription warnings while tracking
+# latest packages, and gating on the pins meant that host silently got neither.
+[ -f "$UI_STATE_JS" ] || exit 0
 [ -f "$INDEX_TPL" ] || exit 0
 
 CHANGED=0
@@ -690,11 +723,17 @@ if ! grep -qF "conservative-policy.js" "$INDEX_TPL" 2>/dev/null; then
     fi
 fi
 
-# The JS file itself lives in a pve-manager-owned directory and can be removed
-# by a package update. Only its absence is repaired here; its CONTENT is owned
-# by proxmox-update-policy.sh, so a stale hook can never overwrite a newer file.
+# The served copy lives in a pve-manager-owned directory and is removed by a
+# package update. Restore it from the master copy rather than just complaining:
+# the content comes from that file, so a stale hook cannot write stale content.
 if [ ! -f "$POLICY_JS" ]; then
-    logger -t proxmox-policy-hook "conservative-policy.js missing; run 'proxmox-update-policy.sh update' to reinstate"
+    mkdir -p "$(dirname "$POLICY_JS")"
+    if install -m 0644 "$UI_STATE_JS" "$POLICY_JS" 2>/dev/null; then
+        CHANGED=1
+        logger -t proxmox-policy-hook "restored conservative-policy.js"
+    else
+        logger -t proxmox-policy-hook "could not restore conservative-policy.js from $UI_STATE_JS"
+    fi
 fi
 
 # Restart pveproxy ONLY if something actually changed. Restarting it on every
@@ -1177,11 +1216,13 @@ disable_cron() {
 show_help() {
     echo "Proxmox VE Conservative Update Policy"
     echo ""
-    echo "Usage: $0 {enable|disable|status|update|cron-enable|cron-disable} [options]"
+    echo "Usage: Usage: $0 {enable|disable|status|update|cron-enable|cron-disable} [options] {enable|disable|ui-only|ui-disable|status|update|cron-enable|cron-disable} [options]"
     echo ""
     echo "Commands:"
     echo "  enable       - Enable policy (pin to n-0.1 minor version)"
     echo "  disable      - Disable policy (allow all updates)"
+    echo "  ui-only      - Suppress subscription warnings WITHOUT pinning"
+    echo "  ui-disable   - Remove the UI customisation, leave pinning alone"
     echo "  status       - Show current policy and available versions"
     echo "  update       - Refresh pinning based on current repo state"
     echo "  cron-enable  - Install daily cron job to auto-update pinning"
@@ -1242,6 +1283,27 @@ case "${1:-help}" in
             esac
         done
         enable_policy "" "$no_ui"
+        ;;
+    ui-only)
+        # Suppress the subscription warnings WITHOUT pinning anything.
+        #
+        # The two are independent concerns and were previously welded together:
+        # the hook gated on the pinning file, so a host that wanted latest
+        # packages silently got the warnings back with no way to say otherwise.
+        echo -e "${GREEN}=== UI Customisation Only (no version pinning) ===${NC}\n"
+        patch_ui "" || exit 1
+        install_ui_hook "" || exit 1
+        echo ""
+        echo "The subscription warnings are suppressed. No packages are pinned:"
+        echo "this host tracks whatever the repository offers."
+        echo ""
+        echo "To pin as well:  sudo $0 enable"
+        echo "To undo:         sudo $0 ui-disable"
+        ;;
+    ui-disable)
+        echo -e "${GREEN}=== Removing UI Customisation ===${NC}\n"
+        remove_ui_hook ""
+        unpatch_ui ""
         ;;
     disable)
         disable_policy

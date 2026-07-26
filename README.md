@@ -129,14 +129,29 @@ Conservative update policy with n-0.1 minor version pinning. Keeps you one minor
 **Commands:**
 
 ```bash
-sudo ./proxmox-update-policy.sh enable       # Enable with UI patches
-sudo ./proxmox-update-policy.sh enable --no-ui  # Enable without UI patches
-sudo ./proxmox-update-policy.sh disable      # Disable and restore UI
+sudo ./proxmox-update-policy.sh enable       # Pin + suppress warnings
+sudo ./proxmox-update-policy.sh enable --no-ui  # Pin only, keep warnings
+sudo ./proxmox-update-policy.sh ui-only      # Suppress warnings, pin nothing
+sudo ./proxmox-update-policy.sh ui-disable   # Restore warnings, keep pinning
+sudo ./proxmox-update-policy.sh disable      # Remove both
 sudo ./proxmox-update-policy.sh status       # Show policy and versions
 sudo ./proxmox-update-policy.sh update       # Refresh pinning
 sudo ./proxmox-update-policy.sh cron-enable  # Install daily cron
 sudo ./proxmox-update-policy.sh cron-disable # Remove cron
 ```
+
+**Pinning and the UI customisation are independent.** A host can hold packages
+back, suppress the subscription warnings, both, or neither:
+
+| Want | Command |
+|---|---|
+| Both | `enable` |
+| Pin only, keep the warnings | `enable --no-ui` |
+| Warnings gone, track latest | `ui-only` |
+| Neither | `disable` |
+
+`ui-only` is the right choice for a host that should stay current -- a lab or
+a personal box -- but without Proxmox telling you off about it on every login.
 
 **UI customisations:**
 

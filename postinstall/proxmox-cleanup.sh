@@ -82,6 +82,7 @@ OLD_SYSCTL=(
 )
 
 FOUND=0
+KEEP=0
 ACTIONS=()
 
 #---------------------------------------------------------------
@@ -105,6 +106,29 @@ has_readonly_keys() {
     # permitted". They are statistics, not settings.
     local content="$1"
     echo "$content" | grep -qE '^[[:space:]]*(kernel\.random\.entropy_avail|kernel\.random\.(boot_id|uuid)|fs\.dentry-state|fs\.file-nr)[[:space:]]*='
+}
+
+sysctl_keys() {
+    # Settable keys in sysctl.d content ($1), one per line, sorted.
+    # Commented lines are inert and must not count.
+    local content="$1"
+    echo "$content" \
+        | grep -oE '^[[:space:]]*[a-z][a-z0-9._-]*[[:space:]]*=' \
+        | tr -d ' =' \
+        | sort -u
+}
+
+orphaned_keys() {
+    # Keys set by the superseded file ($1) that the replacement ($2) does NOT
+    # set, one per line.
+    #
+    # Removing a file purely because a newer generation exists loses whatever
+    # the newer one never picked up. On a real host the superseded tweaks file
+    # carried five keys the replacement had no equivalent for -- dirty
+    # writeback intervals, keepalive probe tuning, an inotify limit -- and all
+    # five would have gone silently. A backup makes that recoverable, not safe.
+    local old_content="$1" new_content="$2"
+    comm -23 <(sysctl_keys "$old_content") <(sysctl_keys "$new_content")
 }
 
 network_tier_from_path() {
@@ -158,8 +182,28 @@ scan() {
             note high "$f" \
                 "sets read-only kernel statistics -- errors on every boot"
         else
+            # Only call it superseded if the replacement actually covers it.
+            local current_content orphans
+            current_content=$(cat /etc/sysctl.d/98-proxmox-optimize.conf 2>/dev/null || echo "")
+            orphans=$(orphaned_keys "$content" "$current_content")
+
+            if [ -n "$orphans" ]; then
+                KEEP=$((KEEP + 1))
+                # Counts as "something to report", or the no-findings fallback
+                # prints "none" directly underneath this entry.
+                found_sysctl=1
+                printf '  %b[KEEP]%b %s\n' "$CYAN" "$NC" "$f"
+                printf '         overrides 98-proxmox-optimize.conf, but sets %s key(s) it does not:\n' \
+                    "$(echo "$orphans" | wc -l)"
+                while IFS= read -r orphan_key; do
+                    printf '           %s\n' "$orphan_key"
+                done <<< "$orphans"
+                printf '         NOT removed -- fold these into 98-proxmox-optimize.conf first.\n'
+                continue
+            fi
+
             note med "$f" \
-                "superseded by 98-proxmox-optimize.conf, which it currently overrides by sort order"
+                "superseded by 98-proxmox-optimize.conf, which covers every key it sets"
         fi
         found_sysctl=1
     done
@@ -208,6 +252,9 @@ scan() {
         echo -e "${GREEN}Nothing superseded found. Host is clean.${NC}"
     else
         echo -e "${YELLOW}${FOUND} superseded artefact(s) found.${NC}"
+    fi
+    if [ "$KEEP" -gt 0 ]; then
+        echo -e "${CYAN}${KEEP} file(s) kept: they still set keys nothing else does.${NC}"
     fi
 }
 

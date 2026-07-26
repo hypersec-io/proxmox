@@ -121,6 +121,69 @@ check "writable neighbour not matched" \
     "1" "$(has_readonly_keys 'kernel.random.write_wakeup_threshold=1024'; echo $?)"
 
 #############################################
+echo -e "\n${CYAN}sysctl_keys / orphaned_keys${NC}"
+#############################################
+
+check "extracts settable keys" \
+    $'net.ipv4.tcp_fin_timeout\nvm.swappiness' \
+    "$(sysctl_keys $'vm.swappiness=10\nnet.ipv4.tcp_fin_timeout=30')"
+
+# A commented key is inert; counting it would make a file look like it still
+# carried a setting it does not.
+check "ignores commented keys" \
+    "vm.swappiness" \
+    "$(sysctl_keys $'vm.swappiness=10\n# kernel.random.entropy_avail=4096')"
+
+check "tolerates spaces around =" \
+    "net.core.rmem_max" \
+    "$(sysctl_keys 'net.core.rmem_max = 33554432')"
+
+# The real content from the live host. Removing the tweaks file because a
+# newer generation exists would have dropped five keys the replacement has no
+# equivalent for -- silently, and with only a backup to notice it by.
+HOST_TWEAKS='vm.swappiness=10
+vm.dirty_background_ratio=5
+vm.dirty_ratio=10
+vm.dirty_expire_centisecs=12000
+vm.dirty_writeback_centisecs=1500
+net.core.netdev_max_backlog=8192
+net.ipv4.tcp_fin_timeout=30
+net.ipv4.tcp_keepalive_time=600
+net.ipv4.tcp_keepalive_probes=3
+net.ipv4.tcp_keepalive_intvl=30
+fs.inotify.max_user_watches=524288
+fs.inotify.max_user_instances=512'
+
+HOST_OPTIMIZE='vm.swappiness=10
+vm.vfs_cache_pressure=50
+vm.dirty_background_ratio=5
+vm.dirty_ratio=10
+net.core.netdev_max_backlog=8192
+net.core.somaxconn=8192
+net.ipv4.tcp_fin_timeout=30
+net.ipv4.tcp_keepalive_time=300
+net.ipv4.tcp_tw_reuse=1
+fs.file-max=2097152
+fs.inotify.max_user_watches=524288'
+
+check "finds the five keys the replacement lacks" \
+    $'fs.inotify.max_user_instances\nnet.ipv4.tcp_keepalive_intvl\nnet.ipv4.tcp_keepalive_probes\nvm.dirty_expire_centisecs\nvm.dirty_writeback_centisecs' \
+    "$(orphaned_keys "$HOST_TWEAKS" "$HOST_OPTIMIZE")"
+
+# A genuinely superseded file has nothing the replacement lacks, and must
+# still be removable -- the guard must not block every cleanup.
+check "fully covered file has no orphans" \
+    "" "$(orphaned_keys $'vm.swappiness=10\nvm.dirty_ratio=10' "$HOST_OPTIMIZE")"
+
+check "empty old file has no orphans" \
+    "" "$(orphaned_keys "" "$HOST_OPTIMIZE")"
+
+# A differing VALUE on a shared key is not an orphan: the replacement still
+# sets it, so nothing is lost by removing the older file.
+check "differing value is not an orphan" \
+    "" "$(orphaned_keys 'net.ipv4.tcp_keepalive_time=600' "$HOST_OPTIMIZE")"
+
+#############################################
 echo -e "\n${CYAN}network_tier_from_path${NC}"
 #############################################
 
