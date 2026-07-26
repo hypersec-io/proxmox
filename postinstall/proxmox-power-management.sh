@@ -330,7 +330,18 @@ for host in /sys/class/scsi_host/host*/; do
         CURRENT=$(tr -d ' ' < "${host}link_power_management_policy" 2>/dev/null)
 
         if [[ " $ZFS_HOSTS " == *" $HOSTNAME_ID "* ]]; then
-            echo "  ${HOSTNAME_ID}: backs a ZFS pool, leaving at '$CURRENT'"
+            # Assert max_performance rather than merely skipping. Skipping
+            # prevents this script making things worse, but leaves a controller
+            # an EARLIER run already put into a power-saving state -- which is
+            # the situation on any host that ran a previous version. The disks
+            # holding the VMs are the last place to save a watt.
+            if [[ "$CURRENT" == "max_performance" ]] || [[ "$CURRENT" == "keep_firmware_settings" ]]; then
+                echo "  ${HOSTNAME_ID}: backs a ZFS pool, already '$CURRENT'"
+            elif echo "max_performance" > "${host}link_power_management_policy" 2>/dev/null; then
+                echo "  ${HOSTNAME_ID}: backs a ZFS pool, '$CURRENT' -> max_performance"
+            else
+                echo -e "  ${HOSTNAME_ID}: ${YELLOW}backs a ZFS pool but could not clear '$CURRENT'${NC}"
+            fi
             SATA_SKIPPED=$((SATA_SKIPPED + 1))
             continue
         fi
@@ -360,7 +371,7 @@ done
 set -e
 
 [ $SATA_COUNT -gt 0 ] && echo "Configured $SATA_COUNT SATA controllers" || echo "No SATA controllers needed changes"
-[ $SATA_SKIPPED -gt 0 ] && echo "Skipped $SATA_SKIPPED controller(s) backing ZFS pools"
+[ "$SATA_SKIPPED" -gt 0 ] && echo "$SATA_SKIPPED controller(s) backing ZFS pools held at max_performance"
 
 #############################################
 # Network Power Management
@@ -580,6 +591,43 @@ for usb in /sys/bus/usb/devices/*/power/control; do
             [ "$CURRENT" != "auto" ] && echo "auto" > "$usb" 2>/dev/null || true
         fi
     fi
+done
+
+# Hold SATA controllers that back a ZFS pool at max_performance.
+#
+# The sysfs link power policy does not persist across a reboot, so setting it
+# once at install time is not enough -- it reverts to whatever the kernel
+# defaults to for that controller. Reasserting it here is what makes it stick.
+#
+# The disks holding the VMs are the last place to save a watt: link power
+# management parks the SATA link between commands and adds wake latency to
+# every I/O, which works directly against the bounded retry times configured by
+# proxmox-disk-errors.sh.
+ZFS_HOSTS=""
+if command -v zpool >/dev/null 2>&1; then
+    for pool in $(zpool list -H -o name 2>/dev/null); do
+        while read -r member; do
+            [ -z "$member" ] && continue
+            memberdev=$(readlink -f "$member" 2>/dev/null)
+            memberdev=${memberdev#/dev/}
+            memberdev=$(echo "$memberdev" | sed -E 's/(nvme[0-9]+n[0-9]+)p[0-9]+$/\1/; s/^([a-z]+)[0-9]+$/\1/')
+            hostpath=$(readlink -f "/sys/block/${memberdev}/device" 2>/dev/null) || continue
+            hostid=$(echo "$hostpath" | grep -oE 'host[0-9]+' | head -1)
+            [ -n "$hostid" ] && ZFS_HOSTS="$ZFS_HOSTS $hostid"
+        done < <(zpool list -vHP "$pool" 2>/dev/null | awk '$1 ~ /^\/dev\// {print $1}')
+    done
+fi
+
+for host in /sys/class/scsi_host/host*/; do
+    [ -f "${host}link_power_management_policy" ] || continue
+    hostid=$(basename "$host")
+    case " $ZFS_HOSTS " in
+        *" $hostid "*)
+            CURRENT=$(tr -d ' ' < "${host}link_power_management_policy" 2>/dev/null)
+            [ "$CURRENT" != "max_performance" ] && \
+                echo "max_performance" > "${host}link_power_management_policy" 2>/dev/null || true
+            ;;
+    esac
 done
 EOF
 

@@ -219,11 +219,21 @@ net.core.netdev_max_backlog=8192
 net.core.somaxconn=8192
 net.ipv4.tcp_fin_timeout=30
 net.ipv4.tcp_keepalive_time=300
+net.ipv4.tcp_keepalive_probes=3
+net.ipv4.tcp_keepalive_intvl=30
 net.ipv4.tcp_tw_reuse=1
 
 # File System
 fs.file-max=2097152
 fs.inotify.max_user_watches=524288
+fs.inotify.max_user_instances=512
+
+# Deliberately NOT set here: vm.dirty_expire_centisecs and
+# vm.dirty_writeback_centisecs. Raising them keeps dirty pages in memory
+# longer, which trades a measurable amount of unflushed data against a small
+# throughput gain. That is a defensible choice on a host with a UPS and a
+# reckless one without, so it is left to the operator rather than shipped as a
+# default -- this file otherwise holds nothing that risks data on power loss.
 EOF
 
 # Bridge netfilter: NOT a Proxmox requirement, despite being widely repeated as

@@ -50,6 +50,13 @@
 #   completely unrelated, healthy pool lost their I/O. SMART reported PASSED
 #   throughout.
 #
+#   Generalised from the hardening Derek wrote by hand during that incident.
+#   Two details are his and were reverted to after the generated versions
+#   proved worse: addressing drives by /dev/disk/by-id rather than sdX, and
+#   matching the udev rule on ID_MODEL rather than per-drive serial. Both
+#   matter for the same reason -- the protection has to survive a reboot or a
+#   disk swap without anyone remembering to re-run this.
+#
 # SAFETY -- READ THIS:
 #   SCT ERC is only correct BECAUSE there is redundancy. Telling a drive in a
 #   NON-redundant pool to give up early tells it to abandon data it might
@@ -179,6 +186,39 @@ base_device() {
     return 0
 }
 
+stable_device_path() {
+    # A /dev/disk/by-id path for $1, or /dev/$1 if none exists.
+    #
+    # Reverted to Derek's original approach from the incident scripts, which
+    # addressed drives by /dev/disk/by-id. The generated version used bare sdX
+    # names and was worse: kernel names are assigned in discovery order and are
+    # NOT stable across reboots, so a boot-time unit that reasserts drive
+    # settings by kernel name can target a different disk than the one it was
+    # written for. On a host where some drives take the setting and others
+    # cannot, that is exactly how the wrong drive ends up unprotected.
+    #
+    # ata-/nvme- links carry model and serial and are preferred; wwn- links are
+    # stable too but opaque, so they are only a fallback.
+    local dev="$1" link base fallback=""
+
+    for link in /dev/disk/by-id/*; do
+        [ -e "$link" ] || continue
+        base=$(basename "$link")
+        case "$base" in *-part[0-9]*) continue ;; esac
+        [ "$(readlink -f "$link")" = "/dev/$dev" ] || continue
+        case "$base" in
+            wwn-*) [ -z "$fallback" ] && fallback="$link" ;;
+            *)     echo "$link"; return 0 ;;
+        esac
+    done
+
+    if [ -n "$fallback" ]; then
+        echo "$fallback"
+        return 0
+    fi
+    echo "/dev/$dev"
+}
+
 pool_members() {
     # Base device names backing pool $1, one per line, deduplicated.
     local pool="$1" member dev
@@ -285,9 +325,17 @@ write_erc_service() {
         return 0
     fi
 
+    # Resolve to stable by-id paths at generation time. The helper must not
+    # depend on kernel names surviving a reboot -- see stable_device_path.
+    local dev paths=()
+    for dev in "${devices[@]}"; do
+        paths+=("$(stable_device_path "$dev")")
+    done
+
     # SCT ERC is volatile: it is lost on a power cycle (though usually not on a
     # warm reboot), so it must be reasserted at every boot rather than set once.
-    cat > "$ERC_HELPER" << EOF
+    {
+        cat << EOF
 #!/bin/bash
 # Reassert SCT ERC on redundant pool members.
 # Installed by: proxmox-disk-errors.sh -- do not edit, changes are overwritten.
@@ -295,16 +343,30 @@ write_erc_service() {
 # SCT ERC does not persist across a power cycle. Without this, the setting
 # silently reverts to the factory default (usually Disabled) and the drive goes
 # back to retrying without bound.
+#
+# Drives are addressed by /dev/disk/by-id, not sdX: kernel names are assigned
+# in discovery order and a drive that moves between boots would otherwise have
+# the setting applied to whatever took its old name.
 
-for dev in ${devices[*]}; do
-    [ -b "/dev/\$dev" ] || continue
-    smartctl -l scterc,${ERC_DECISECONDS},${ERC_DECISECONDS} "/dev/\$dev" >/dev/null 2>&1 \\
-        && logger -t zfs-disk-erc "SCT ERC ${ERC_DECISECONDS}ds set on \$dev" \\
-        || logger -t zfs-disk-erc "failed to set SCT ERC on \$dev"
+EOF
+        for dev in "${paths[@]}"; do
+            printf 'for_each_drive+=("%s")\n' "$dev"
+        done
+        cat << EOF
+
+for drive in "\${for_each_drive[@]}"; do
+    # A drive that has been pulled or replaced must not fail the unit.
+    [ -e "\$drive" ] || { logger -t zfs-disk-erc "absent, skipped: \$drive"; continue; }
+    if smartctl -l scterc,${ERC_DECISECONDS},${ERC_DECISECONDS} "\$drive" >/dev/null 2>&1; then
+        logger -t zfs-disk-erc "SCT ERC ${ERC_DECISECONDS}ds set on \$drive"
+    else
+        logger -t zfs-disk-erc "failed to set SCT ERC on \$drive"
+    fi
 done
 
 exit 0
 EOF
+    } > "$ERC_HELPER"
     chmod +x "$ERC_HELPER"
 
     cat > "$ERC_SERVICE" << EOF
@@ -349,24 +411,49 @@ write_udev_rule() {
         echo "# up on their behalf. The 30s default is far longer than any healthy SATA"
         echo "# I/O; ${NO_SCT_TIMEOUT}s converts a stall into an error ZFS can actually repair from."
         echo "#"
-        echo "# Matched on serial so the rule survives device renaming (sdc is not stable)."
+        echo "# Matched on MODEL, not serial -- reverted to Derek's original incident"
+        echo "# rule, which matched ENV{ID_MODEL} and worked better than the generated"
+        echo "# per-serial version that briefly replaced it."
+        echo "#"
+        echo "# Whether a drive supports SCT ERC is a property of the MODEL, so a"
+        echo "# replacement of the same model needs the same backstop -- and would not"
+        echo "# get it from a serial-specific rule until somebody remembered to re-run"
+        echo "# this script. Fitting a replacement disk is exactly the moment nobody is"
+        echo "# thinking about kernel timeouts."
         echo "#"
         echo "# DEVTYPE==\"disk\" restricts this to whole disks. A partition carries the"
-        echo "# same serial but has no device/timeout attribute of its own -- without the"
-        echo "# restriction udev retries the assignment against every partition and logs a"
-        echo "# failure for each."
+        echo "# same model but has no device/timeout attribute of its own -- without the"
+        echo "# restriction udev retries the assignment against every partition and logs"
+        echo "# a failure for each."
         echo ""
+
+        # One rule per distinct model, rather than one per drive.
+        local models=() model seen
         for dev in "${devices[@]}"; do
-            serial=$(udevadm info --query=property --name="/dev/$dev" 2>/dev/null | \
-                     sed -n 's/^ID_SERIAL_SHORT=//p' | head -1)
-            if [ -n "$serial" ]; then
-                echo "ACTION==\"add|change\", SUBSYSTEM==\"block\", ENV{DEVTYPE}==\"disk\", ENV{ID_SERIAL_SHORT}==\"${serial}\", ATTR{device/timeout}=\"${NO_SCT_TIMEOUT}\""
-            else
-                # No stable serial exposed; fall back to the kernel name and say
-                # so, rather than silently writing a rule that matches nothing.
-                echo "# WARNING: no ID_SERIAL_SHORT for ${dev}, matching on kernel name (not stable across reboots)"
-                echo "ACTION==\"add|change\", SUBSYSTEM==\"block\", ENV{DEVTYPE}==\"disk\", KERNEL==\"${dev}\", ATTR{device/timeout}=\"${NO_SCT_TIMEOUT}\""
+            model=$(udevadm info --query=property --name="/dev/$dev" 2>/dev/null | \
+                    sed -n 's/^ID_MODEL=//p' | head -1)
+            if [ -z "$model" ]; then
+                serial=$(udevadm info --query=property --name="/dev/$dev" 2>/dev/null | \
+                         sed -n 's/^ID_SERIAL_SHORT=//p' | head -1)
+                if [ -n "$serial" ]; then
+                    echo "# ${dev}: no ID_MODEL exposed, falling back to serial"
+                    echo "ACTION==\"add|change\", SUBSYSTEM==\"block\", ENV{DEVTYPE}==\"disk\", ENV{ID_SERIAL_SHORT}==\"${serial}\", ATTR{device/timeout}=\"${NO_SCT_TIMEOUT}\""
+                else
+                    echo "# WARNING: no ID_MODEL or ID_SERIAL_SHORT for ${dev}; kernel name is not stable across reboots"
+                    echo "ACTION==\"add|change\", SUBSYSTEM==\"block\", ENV{DEVTYPE}==\"disk\", KERNEL==\"${dev}\", ATTR{device/timeout}=\"${NO_SCT_TIMEOUT}\""
+                fi
+                continue
             fi
+
+            seen=0
+            for m in "${models[@]:-}"; do
+                [ "$m" = "$model" ] && { seen=1; break; }
+            done
+            [ "$seen" -eq 1 ] && continue
+            models+=("$model")
+
+            echo "# ${model} -- no SCT ERC support"
+            echo "ACTION==\"add|change\", SUBSYSTEM==\"block\", ENV{DEVTYPE}==\"disk\", ENV{ID_MODEL}==\"${model}\", ATTR{device/timeout}=\"${NO_SCT_TIMEOUT}\""
         done
     } > "$UDEV_RULE"
 
