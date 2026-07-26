@@ -285,25 +285,69 @@ fi
 echo -e "\n${YELLOW}[4/8] Configuring Storage Power Management (balanced)${NC}"
 
 # SATA Link Power Management
+#
+# NOT applied to controllers that back a ZFS pool. Aggressive Link Power
+# Management parks the SATA link between commands, and waking it adds latency
+# on every I/O. On consumer SATA SSDs in particular it is a documented cause of
+# link resets, "failed command: READ FPDMA QUEUED" and outright drive dropouts
+# -- the same failure class as the 2026-07-26 outage, where a drive that
+# stalled instead of erroring wedged an entire pool.
+#
+# It also works directly against proxmox-disk-errors.sh, which lowers the
+# kernel command timeout to 10s so a sick drive fails fast enough for ZFS to
+# repair from redundancy. Adding link-wake latency to the same devices pushes
+# healthy I/O towards that timeout.
+#
+# The saving is a couple of watts per drive. It is not worth it on the disks
+# holding the VMs.
 echo "Configuring SATA link power management..."
 SATA_COUNT=0
+SATA_SKIPPED=0
 
 # Temporarily disable error exit
 set +e
 
+# SCSI hosts backing a ZFS pool member. Built once rather than per-host.
+ZFS_HOSTS=""
+if command -v zpool >/dev/null 2>&1; then
+    for pool in $(zpool list -H -o name 2>/dev/null); do
+        while read -r member; do
+            [ -z "$member" ] && continue
+            memberdev=$(readlink -f "$member" 2>/dev/null)
+            memberdev=${memberdev#/dev/}
+            # Strip a partition suffix: sdc1 -> sdc, nvme0n1p1 -> nvme0n1.
+            memberdev=$(echo "$memberdev" | sed -E 's/(nvme[0-9]+n[0-9]+)p[0-9]+$/\1/; s/^([a-z]+)[0-9]+$/\1/')
+            hostpath=$(readlink -f "/sys/block/${memberdev}/device" 2>/dev/null) || continue
+            hostid=$(echo "$hostpath" | grep -oE 'host[0-9]+' | head -1)
+            [ -n "$hostid" ] && ZFS_HOSTS="$ZFS_HOSTS $hostid"
+        done < <(zpool list -vHP "$pool" 2>/dev/null | awk '$1 ~ /^\/dev\// {print $1}')
+    done
+fi
+
 for host in /sys/class/scsi_host/host*/; do
     if [ -f "${host}link_power_management_policy" ]; then
+        HOSTNAME_ID=$(basename "$host")
         CURRENT=$(tr -d ' ' < "${host}link_power_management_policy" 2>/dev/null)
 
+        if [[ " $ZFS_HOSTS " == *" $HOSTNAME_ID "* ]]; then
+            echo "  ${HOSTNAME_ID}: backs a ZFS pool, leaving at '$CURRENT'"
+            SATA_SKIPPED=$((SATA_SKIPPED + 1))
+            continue
+        fi
+
         # Check if already configured
-        if [[ "$CURRENT" == "med_power_with_dipm" ]] || [[ "$CURRENT" == "medium_power" ]] || [[ "$CURRENT" == "min_power" ]]; then
-            echo "  $(basename "$host"): Already configured ($CURRENT)"
+        if [[ "$CURRENT" == "med_power_with_dipm" ]] || [[ "$CURRENT" == "medium_power" ]]; then
+            echo "  ${HOSTNAME_ID}: Already configured ($CURRENT)"
         else
-            echo "  $(basename "$host"): Current = $CURRENT"
-            # Try different policy names
-            for policy in "med_power_with_dipm" "medium_power" "min_power"; do
+            echo "  ${HOSTNAME_ID}: Current = $CURRENT"
+            # med_power_with_dipm is the modern, generally-safe policy.
+            # min_power is deliberately NOT in this list: it is the most
+            # aggressive setting and the one most often blamed for dropped
+            # links on SATA SSDs. A couple of extra watts is a better trade
+            # than a disk that vanishes mid-write.
+            for policy in "med_power_with_dipm" "medium_power"; do
                 if echo "$policy" > "${host}link_power_management_policy" 2>/dev/null; then
-                    echo "    → Set to: $policy"
+                    echo "    -> Set to: $policy"
                     SATA_COUNT=$((SATA_COUNT + 1))
                     break
                 fi
@@ -315,7 +359,8 @@ done
 # Re-enable error exit
 set -e
 
-[ $SATA_COUNT -gt 0 ] && echo "Configured $SATA_COUNT SATA controllers" || echo "All SATA controllers already configured"
+[ $SATA_COUNT -gt 0 ] && echo "Configured $SATA_COUNT SATA controllers" || echo "No SATA controllers needed changes"
+[ $SATA_SKIPPED -gt 0 ] && echo "Skipped $SATA_SKIPPED controller(s) backing ZFS pools"
 
 #############################################
 # Network Power Management
@@ -568,7 +613,7 @@ if [ -z "$TEMP" ]; then
     exit 1
 fi
 
-echo "Current max temperature: ${TEMP}°C"
+echo "Current max temperature: ${TEMP}C"
 
 # Temperature thresholds
 if [ "$TEMP" -ge 95 ]; then
@@ -594,10 +639,10 @@ chmod +x /usr/local/bin/thermal-check
 
 echo -e "${GREEN}OK Thermal monitoring script created${NC}"
 echo -e "${CYAN}Note: CPUs handle thermal throttling automatically${NC}"
-echo -e "${CYAN}At critical temps (95°C+), the CPU will:${NC}"
+echo -e "${CYAN}At critical temps (95C+), the CPU will:${NC}"
 echo -e "${CYAN}  1. Reduce frequency automatically${NC}"
 echo -e "${CYAN}  2. Reduce voltage if needed${NC}"
-echo -e "${CYAN}  3. Emergency shutdown at ~105-110°C${NC}"
+echo -e "${CYAN}  3. Emergency shutdown at ~105-110C${NC}"
 
 #############################################
 # Create/Update Management Scripts
@@ -624,7 +669,7 @@ if command -v sensors >/dev/null 2>&1; then
     TEMP=$(sensors 2>/dev/null | grep -E "Core|Tdie|Package" | \
         awk '{print $3}' | sed 's/[^0-9.]//g' | sort -rn | head -1 | cut -d. -f1)
     if [ -n "$TEMP" ]; then
-        echo "${TEMP}°C"
+        echo "${TEMP}C"
     else
         echo "N/A"
     fi
@@ -703,9 +748,9 @@ echo -e "${CYAN}This script is IDEMPOTENT - safe to run multiple times${NC}"
 
 echo -e "\n${CYAN}Configuration Status:${NC}"
 # Show current status
-echo -n "  • CPU Governor: "
+echo -n "  - CPU Governor: "
 cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "N/A"
-echo -n "  • PCIe ASPM: "
+echo -n "  - PCIe ASPM: "
 grep -oE '\[.*\]' /sys/module/pcie_aspm/parameters/policy 2>/dev/null | tr -d '[]' || echo "N/A"
 
 echo -e "\n${CYAN}Available Commands:${NC}"

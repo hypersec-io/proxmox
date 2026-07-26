@@ -17,6 +17,39 @@ Idempotent scripts for Proxmox VE post-installation configuration. Brought to yo
 - **Conservative Updates** - N-1 minor version pinning, UI customisation, APT persistence hooks
 - **Internal NAT** - Host-side VM networking with any IPv4 CIDR
 - **Remote Access** - AWS SSM and NetBird agents for emergency console access
+- **Drive Error Recovery** - SCT ERC and kernel timeouts so ZFS sees errors, not stalls
+- **Artefact Cleanup** - Removes superseded config left by earlier runs
+
+---
+
+## Goal
+
+Make a Proxmox VE host on the **community (no-subscription) repositories** behave
+as close to an enterprise deployment as it can: current on fixes, never first
+onto a new minor release, tuned for its hardware, and honest about what it is
+(the subscription nags are replaced with a statement of the actual update
+policy, not just hidden).
+
+### Two deployment targets, one deployment
+
+| | Target 1 | Target 2 |
+|---|---|---|
+| Shape | Single node | Multi-node cluster |
+| Who | Solo dev, small team, home brick server | Production private cloud |
+| Scripts run | All of them | All of them, on every node |
+
+The scripts are the same on both, deliberately. Work that starts on someone's
+home Proxmox box should move to a production cluster without a rebuild, so
+nothing here is conditional on being "the small one".
+
+Only two things differ, and both are detected rather than configured:
+
+- **Update policy** is coordinated cluster-wide. A cluster requires matching
+  versions across nodes, so the resolved series are written to `/etc/pve`
+  (the replicated cluster filesystem) and every node reproduces the same
+  decision instead of resolving independently and drifting apart. A standalone
+  node has no cluster filesystem and simply resolves locally.
+- **Bridge netfilter** is only asserted where `pve-firewall` is enabled.
 
 ---
 
@@ -24,18 +57,24 @@ Idempotent scripts for Proxmox VE post-installation configuration. Brought to yo
 
 ```bash
 # Download and extract
-wget https://github.com/hypersec-io/proxmox/archive/refs/heads/main.zip
+wget https://github.com/hyperi-io/proxmox/archive/refs/heads/main.zip
 unzip main.zip && cd proxmox-main/postinstall
 chmod +x *.sh *.py
 
 # Run in order
+sudo ./proxmox-cleanup.sh status    # What did an earlier run leave behind?
 sudo ./proxmox-repo.sh              # Configure repositories
 sudo ./proxmox-optimize.sh          # Core system optimisation
 sudo ./proxmox-zfs.sh               # ZFS tuning (if applicable)
+sudo ./proxmox-disk-errors.sh apply # Drive error recovery (if ZFS)
 sudo ./proxmox-power-management.sh  # Power management (optional)
 sudo ./proxmox-network.sh 10gbe     # Network tuning (optional)
 sudo ./proxmox-update-policy.sh enable  # Conservative updates (optional)
 ```
+
+Run `proxmox-cleanup.sh status` first on any host that has run an earlier
+version of these scripts -- it reports superseded config that is still active
+and changes nothing until you run `apply`.
 
 After running, update GRUB and reboot if prompted:
 
@@ -69,7 +108,7 @@ Configures Proxmox VE repositories for community (no-subscription) use.
 
 ### proxmox-update-policy.sh
 
-Conservative update policy with n-1 minor version pinning. Keeps you one minor version behind bleeding edge while allowing patch updates.
+Conservative update policy with n-0.1 minor version pinning. Keeps you one minor version behind bleeding edge while allowing patch updates.
 
 **What it does:**
 
@@ -82,7 +121,7 @@ Conservative update policy with n-1 minor version pinning. Keeps you one minor v
 **Policy behaviour:**
 
 - **MAJOR:** Same as latest available
-- **MINOR:** max(installed, n-1) - never downgrades
+- **MINOR:** max(installed, n-0.1) - never downgrades
 - **PATCH:** Latest within target minor
 
 **Example:** If repo has 9.2.3, policy pins to 9.1.* (gets 9.1.x patches, skips 9.2.x)
@@ -101,11 +140,34 @@ sudo ./proxmox-update-policy.sh cron-disable # Remove cron
 
 **UI customisations:**
 
-When enabled, modifies the Proxmox web interface:
+When enabled, the web interface reports the update policy that is actually in
+force instead of a generic warning:
 
-- Replaces "not recommended for production" with "Conservative update policy active"
-- Changes warning icons to green success indicators
-- Persists across package updates via APT hook
+- Suppresses the "no valid subscription" modal shown after login
+- Replaces the no-subscription repository warning with "Conservative update
+  policy active", and only when that warning was the *only* thing wrong -- a
+  genuine problem still surfaces
+- Persists across package updates via an APT hook
+
+This relabels repository status. It does **not** represent the host as holding
+a subscription and does not change what the host is entitled to.
+
+**How it is implemented, and why it matters:**
+
+The customisation is a single injected JavaScript file using ExtJS class
+overrides -- the framework's own extension mechanism. **No Proxmox source file
+is modified.** The only edit is one `<script>` tag added to `index.html.tpl`.
+
+Earlier versions text-patched `proxmoxlib.js` in seven places. That approach
+broke on every PVE release that restructured the file (on PVE 9.2.5 only two of
+the seven still matched), and because the patches carried placeholder line
+numbers, `patch(1)` fuzzy-matched short repeated lines and could edit an
+unintended one. The override survives package updates untouched, and if
+upstream renames what it hooks the original warning simply reappears rather
+than the UI breaking.
+
+Deleting `/usr/share/pve-manager/js/conservative-policy.js` restores stock
+behaviour completely.
 
 **Compatibility:** Tested on PVE 9.x only. PVE 8.x may work.
 
@@ -265,6 +327,11 @@ Safe ZFS optimisation for Proxmox storage.
 
 **Safety settings preserved:** `sync=standard`, `compression` (Proxmox-managed), `primarycache=all`
 
+**zvol taskq sizing:** `zvol_threads` scales with CPU count and `zvol_num_taskqs`
+partitions zvols across independent taskqs. A single shared taskq is a
+host-wide single point of failure: if one device wedges, its blocked threads
+starve guests on completely unrelated, healthy pools.
+
 **Created commands:** `zfs-status`, `zfs-tune-guide`
 
 | Property | Value |
@@ -272,6 +339,73 @@ Safe ZFS optimisation for Proxmox storage.
 | Idempotent | Yes |
 | Reboot | Recommended |
 | Backup | None (safe operations) |
+
+---
+
+### proxmox-disk-errors.sh
+
+Bounds how long a drive may retry a bad sector, so it returns an error instead
+of stalling.
+
+**Why this matters more than it sounds:** ZFS can only act on an *error*, never
+on a *stall*. A drive that retries without bound never triggers the
+repair-from-redundancy path, so a bad block is never healed and every I/O
+queued behind it waits. Redundancy you cannot reach is not redundancy.
+
+**What it does:**
+
+- Enables SCT ERC (7s) on drives that support it -- most do, and most ship with
+  it **Disabled**
+- Falls back to the kernel command timeout (10s, vs the 30s default) for drives
+  with no SCT support
+- Reapplies SCT ERC on every boot via systemd, because it does not survive a
+  power cycle
+- Matches the udev rule on drive serial, not `sdX`, which is not stable
+
+**Only applied to pools that HAVE redundancy.** On a single disk, telling the
+drive to give up early tells it to abandon data nothing else holds. The script
+detects layout and skips non-redundant pools.
+
+```bash
+sudo ./proxmox-disk-errors.sh apply    # Configure
+sudo ./proxmox-disk-errors.sh status   # Per-drive report
+sudo ./proxmox-disk-errors.sh remove   # Revert
+```
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | No |
+| Backup | N/A |
+
+---
+
+### proxmox-cleanup.sh
+
+Finds and removes artefacts left by **earlier versions of these scripts**.
+
+None of the other scripts clean up their predecessors. Because they write into
+drop-in directories that apply everything they contain, a superseded generation
+does not become inert -- it stays active and fights the current one.
+
+**What it looks for:**
+
+- APT hooks from earlier generations still patching the same files
+- sysctl drop-ins superseded by `98-proxmox-optimize.conf`
+- sysctl files that are raw `sysctl -a` dumps rather than configs
+- sysctl files setting read-only kernel statistics, which error on every boot
+- More than one network tier file, all applying at once
+
+```bash
+sudo ./proxmox-cleanup.sh status   # Report only, changes nothing (default)
+sudo ./proxmox-cleanup.sh apply    # Remove, backing each up first
+```
+
+| Property | Value |
+|----------|-------|
+| Idempotent | Yes |
+| Reboot | No |
+| Backup | `/root/backup/proxmox-config/removed-<timestamp>/` |
 
 ---
 
@@ -425,19 +559,28 @@ sudo ./proxmox-netbird.py uninstall
 ### Created/Modified
 
 ```text
-/etc/sysctl.d/99-proxmox-optimize.conf       # Kernel parameters
+/etc/sysctl.d/98-proxmox-optimize.conf       # Kernel parameters (base)
+/etc/sysctl.d/99-proxmox-network-<tier>.conf # Kernel parameters (network tier)
 /etc/modprobe.d/kvm-nested.conf              # Nested virtualisation
-/etc/modprobe.d/zfs.conf                     # ZFS ARC limits
+/etc/modprobe.d/zfs.conf                     # ZFS ARC + zvol taskq
 /etc/modules                                 # VFIO modules
 /etc/default/grub                            # Boot parameters
 /etc/default/cpufrequtils                    # CPU governor
 /etc/systemd/system/proxmox-power.service    # Power service
-/etc/apt/sources.list.d/debian.sources       # Proxmox repos
+/etc/systemd/system/zfs-disk-erc.service     # SCT ERC (reapplied each boot)
+/etc/udev/rules.d/60-zfs-disk-timeouts.rules # Kernel timeout, no-SCT drives
+/etc/apt/sources.list.d/debian-official.sources   # Debian repos
+/etc/apt/sources.list.d/proxmox.sources      # Proxmox no-subscription repo
 /etc/apt/preferences.d/proxmox-conservative  # Update policy pinning
 /etc/apt/apt.conf.d/99proxmoxpolicy          # Update policy APT hook
+/etc/pve/proxmox-conservative-series         # Cluster-agreed pin series
 /usr/local/bin/proxmox-policy-hook.sh        # Update policy hook script
 /usr/share/pve-manager/js/conservative-policy.js  # UI policy flag
 ```
+
+The sysctl files are numbered so the network tier file deliberately overrides
+the base one where they overlap. Only ONE tier file should ever exist -- see
+`proxmox-cleanup.sh` if more than one is present.
 
 ### Backup Locations
 
@@ -490,6 +633,61 @@ proxmox-update-policy.sh update   # Refresh pinning
 proxmox-ssm.py status             # SSM agent status
 proxmox-netbird.py status         # NetBird status
 ```
+
+---
+
+## TRIM and thin zvols
+
+`mkfs.ext4` issues a **full-device TRIM by default**. Against a thin zvol that
+discard is enormous, and ZFS has to digest all of it before anything else
+proceeds -- formatting a 2 TB thin zvol produced a 769-second transaction group
+during the incident that prompted `proxmox-disk-errors.sh`, blocking every
+guest on the host.
+
+Rules:
+
+- **Always pass `-E nodiscard` when running `mkfs.ext4` on a zvol.**
+
+  ```bash
+  mkfs.ext4 -E nodiscard /dev/zvol/vmdata/vm-100-disk-1
+  ```
+
+- **Reclaim deliberately, not continuously.** `proxmox-optimize.sh` enables the
+  weekly `fstrim.timer`, which is correct for ordinary filesystems but will
+  repeat a large discard against mostly-empty thin zvols. For bulk data
+  volumes, add `X-fstrim.notrim` to the fstab options and run a single
+  `fstrim <mountpoint>` by hand while the host is idle. Batched discard is far
+  cheaper than synchronous per-delete discard.
+
+- **Avoid `fstrim -a`** on guests holding bulk thin volumes: it ignores the
+  `X-fstrim.notrim` exclusion.
+
+---
+
+## Testing
+
+The test suite runs on any machine with bash and apt. No Proxmox, no root, no
+network:
+
+```bash
+./tests/test-update-policy.sh   # the n-0.1 rule, version arithmetic
+./tests/test-disk-errors.sh     # pool redundancy + SCT ERC detection
+./tests/test-cleanup.sh         # superseded-artefact classification
+./tests/test-apt-pinning.sh     # apt behaviour against a throwaway repo
+```
+
+The scripts under test are **sourceable**: sourcing defines their functions and
+returns without executing anything, so the decision logic can be driven
+directly.
+
+`test-apt-pinning.sh` is the one that matters most. It builds a real apt
+repository of throwaway packages at known versions, points an isolated apt root
+at it, and asserts on `apt-cache policy` -- so "the pin actually holds" is
+proven rather than assumed. The previous pinning implementation looked correct
+and pinned almost nothing; only asserting against apt catches that.
+
+Integration coverage that needs a real PVE install (UI patching, the APT hook,
+ZFS module parameters) is documented in [tests/nested-pve.md](tests/nested-pve.md).
 
 ---
 
@@ -633,6 +831,21 @@ Copyright 2025 HyperSec
 Licensed under the Apache License, Version 2.0
 ```
 
+### Relationship to Proxmox VE
+
+Apache-2.0 covers **this toolkit**. It does not cover Proxmox VE.
+
+Proxmox VE and `proxmox-widget-toolkit` are Copyright Proxmox Server Solutions
+GmbH and licensed **AGPLv3**. Nothing here vendors, redistributes or relicenses
+any part of them.
+
+These scripts configure a Proxmox installation on the machine they are run on.
+The UI customisation is an ExtJS override -- it calls public framework and
+`Proxmox.Utils` entry points and adds its own class; it contains no Proxmox
+source. The only change made to a Proxmox-owned file is a single `<script>` tag
+in `index.html.tpl`, applied locally at install time and reversible with
+`proxmox-update-policy.sh disable`.
+
 ---
 
 ## Disclaimer
@@ -649,7 +862,7 @@ These scripts modify system configuration. While designed to be safe and idempot
 
 ## Support
 
-- Issues: [GitHub Issues](https://github.com/hypersec-io/proxmox/issues)
+- Issues: [GitHub Issues](https://github.com/hyperi-io/proxmox/issues)
 - Documentation: This README and inline script comments
 
 ---

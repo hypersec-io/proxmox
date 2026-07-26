@@ -48,7 +48,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 
 # ANSI colors
@@ -91,11 +90,11 @@ ACTIVATION_STORE = Path("/etc/amazon/ssm/activation-info")
 
 @dataclass
 class Config:
-    region: Optional[str] = None
+    region: str | None = None
     role_name: str = "SSMHybridOnPremises"
-    instance_name: Optional[str] = None
-    activation_code: Optional[str] = None
-    activation_id: Optional[str] = None
+    instance_name: str | None = None
+    activation_code: str | None = None
+    activation_id: str | None = None
 
 
 def run_cmd(
@@ -129,7 +128,7 @@ def aws_cmd(
     args: list[str],
     region: str,
     check: bool = True,
-) -> Optional[dict]:
+) -> dict | None:
     """Run an AWS CLI command and return parsed JSON output."""
     cmd = ["aws"] + args + ["--region", region, "--output", "json"]
     result = run_cmd(cmd, check=check)
@@ -167,7 +166,7 @@ def backup_file(path: Path) -> None:
     print(f"Backup: {path} -> {backup_path}")
 
 
-def detect_region(config: Config) -> Optional[str]:
+def detect_region(config: Config) -> str | None:
     """Detect AWS region from various sources."""
     # 1. Already set via --region
     if config.region:
@@ -211,7 +210,7 @@ def is_agent_registered() -> bool:
     return SSM_REGISTRATION_FILE.exists()
 
 
-def get_managed_instance_id() -> Optional[str]:
+def get_managed_instance_id() -> str | None:
     """Get the managed instance ID from registration file."""
     if not SSM_REGISTRATION_FILE.exists():
         return None
@@ -223,7 +222,7 @@ def get_managed_instance_id() -> Optional[str]:
         return None
 
 
-def get_stored_region() -> Optional[str]:
+def get_stored_region() -> str | None:
     """Get the region from stored activation info."""
     if not ACTIVATION_STORE.exists():
         return None
@@ -680,7 +679,8 @@ Examples:
   sudo ./proxmox-ssm.py install --region ap-southeast-2
 
   # Install with existing activation
-  sudo ./proxmox-ssm.py install --activation-code ABCD-1234 --activation-id 12345678-... --region ap-southeast-2
+  sudo ./proxmox-ssm.py install --activation-code ABCD-1234 \\
+      --activation-id 12345678-... --region ap-southeast-2
 
   # Check status
   sudo ./proxmox-ssm.py status
@@ -701,7 +701,14 @@ Examples:
         help="IAM role name (default: SSMHybridOnPremises)",
     )
     install_parser.add_argument("--instance-name", help="Managed instance name (default: hostname)")
-    install_parser.add_argument("--activation-code", help="Use existing activation code")
+    install_parser.add_argument(
+        "--activation-code",
+        help=(
+            "Use existing activation code. Prefer SSM_ACTIVATION_CODE in the "
+            "environment: a value passed here lands in shell history and is "
+            "visible in 'ps' for the whole run"
+        ),
+    )
     install_parser.add_argument("--activation-id", help="Use existing activation ID")
 
     # Uninstall command
@@ -722,14 +729,23 @@ Examples:
         config.region = args.region
         config.role_name = args.role_name
         config.instance_name = args.instance_name
-        config.activation_code = args.activation_code
-        config.activation_id = args.activation_id
+        # An activation code passed on the command line is recorded in shell
+        # history and readable from /proc for the whole run. The environment is
+        # the safer channel, so it wins where both are supplied.
+        config.activation_code = os.environ.get("SSM_ACTIVATION_CODE") or args.activation_code
+        config.activation_id = os.environ.get("SSM_ACTIVATION_ID") or args.activation_id
+
+        if args.activation_code and not os.environ.get("SSM_ACTIVATION_CODE"):
+            warn(
+                "Activation code passed as an argument. It is now in your shell "
+                "history -- clear it, or use SSM_ACTIVATION_CODE next time."
+            )
 
         # Validate activation args
         if config.activation_code and not config.activation_id:
-            die("--activation-code requires --activation-id")
+            die("An activation code requires an activation ID")
         if config.activation_id and not config.activation_code:
-            die("--activation-id requires --activation-code")
+            die("An activation ID requires an activation code")
 
         cmd_install(config)
 

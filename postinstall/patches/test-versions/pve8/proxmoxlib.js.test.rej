@@ -1,5 +1,0 @@
---- proxmoxlib.js
-+++ proxmoxlib.js
-@@ -1 +1 @@
--                        gettext('Non production-ready repository enabled\!'),
-+                        Proxmox.Utils.conservativePolicyActive ? 'Conservative update policy active' : gettext('Non production-ready repository enabled\!'),

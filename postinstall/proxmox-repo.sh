@@ -147,22 +147,49 @@ OLD_DEBIAN_SOURCES="/etc/apt/sources.list.d/debian.sources"
 if [ -f "$OLD_DEBIAN_SOURCES" ] && grep -q "download.proxmox.com" "$OLD_DEBIAN_SOURCES" 2>/dev/null; then
     rm -f "$OLD_DEBIAN_SOURCES"
     echo -e "${CYAN}Removed old misnamed file: $OLD_DEBIAN_SOURCES${NC}"
+elif [ -f "$OLD_DEBIAN_SOURCES" ]; then
+    # A stock Debian sources file, as shipped by the cloud/netinst images. Our
+    # debian-official.sources covers the same suites plus security and updates,
+    # so leaving both configured makes apt fetch every index twice and warn
+    # about targets configured more than once.
+    mv "$OLD_DEBIAN_SOURCES" "${OLD_DEBIAN_SOURCES}.disabled"
+    echo -e "${CYAN}Disabled duplicate stock file: $OLD_DEBIAN_SOURCES${NC}"
 fi
 
-# Disable enterprise repositories
-if [ -f "/etc/apt/sources.list.d/pve-enterprise.sources" ]; then
-    mv -n "/etc/apt/sources.list.d/pve-enterprise.sources" "/etc/apt/sources.list.d/pve-enterprise.sources.disabled" 2>/dev/null || true
-    echo -e "${GREEN}OK Enterprise repository disabled${NC}"
-else
-    echo -e "${CYAN}Enterprise repository already disabled${NC}"
-fi
+#############################################
+# Disable subscription-only repositories
+#############################################
+# Both the .sources (deb822) and legacy .list forms are handled, and this is
+# re-run safe on purpose: installing proxmox-ve ADDS pve-enterprise back. A
+# host built on the no-subscription repos therefore grows an enterprise repo
+# the moment PVE itself is installed, and every subsequent apt-get update
+# fails with 401 Unauthorized until it is disabled again.
+#
+# That means this script must be re-run AFTER installing proxmox-ve on a
+# Debian host, not only before.
+disable_repo() {
+    local path="$1" label="$2"
+    if [ -f "$path" ]; then
+        mv -f "$path" "${path}.disabled"
+        echo -e "${GREEN}OK ${label} disabled ($(basename "$path"))${NC}"
+        return 0
+    fi
+    return 1
+}
 
-if [ -f "/etc/apt/sources.list.d/ceph.sources" ]; then
-    mv -n "/etc/apt/sources.list.d/ceph.sources" "/etc/apt/sources.list.d/ceph.sources.disabled" 2>/dev/null || true
-    echo -e "${GREEN}OK Ceph repository disabled${NC}"
-else
-    echo -e "${CYAN}Ceph repository already disabled${NC}"
-fi
+ENTERPRISE_DISABLED=false
+for f in /etc/apt/sources.list.d/pve-enterprise.sources \
+         /etc/apt/sources.list.d/pve-enterprise.list; do
+    disable_repo "$f" "Enterprise repository" && ENTERPRISE_DISABLED=true
+done
+[ "$ENTERPRISE_DISABLED" = false ] && echo -e "${CYAN}Enterprise repository already disabled${NC}"
+
+CEPH_DISABLED=false
+for f in /etc/apt/sources.list.d/ceph.sources \
+         /etc/apt/sources.list.d/ceph.list; do
+    disable_repo "$f" "Ceph repository" && CEPH_DISABLED=true
+done
+[ "$CEPH_DISABLED" = false ] && echo -e "${CYAN}Ceph repository already disabled${NC}"
 
 #############################################
 # Update Package Lists
@@ -177,10 +204,10 @@ echo -e "${GREEN}OK Package lists updated${NC}"
 echo -e "\n${GREEN}=== Configuration Complete ===${NC}"
 echo ""
 echo "Applied:"
-echo "  • Debian ${DEBIAN_CODENAME} official repositories configured"
-echo "  • Proxmox no-subscription repository enabled"
-echo "  • Enterprise repositories disabled"
+echo "  - Debian ${DEBIAN_CODENAME} official repositories configured"
+echo "  - Proxmox no-subscription repository enabled"
+echo "  - Enterprise repositories disabled"
 echo ""
 echo "Next steps:"
-echo "  • Run proxmox-update-policy.sh to enable conservative updates"
+echo "  - Run proxmox-update-policy.sh to enable conservative updates"
 echo "    and suppress 'not recommended for production' warnings"

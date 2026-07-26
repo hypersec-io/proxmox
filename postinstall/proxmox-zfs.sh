@@ -122,6 +122,30 @@ else
 fi
 
 #############################################
+# zvol taskq sizing
+#############################################
+# zvol I/O is dispatched through a taskq that is SHARED across every zvol on
+# every pool. Pinning it to a fixed 8 threads estate-wide means one misbehaving
+# device can consume them all and starve guests whose disks live on a
+# completely different, healthy pool.
+#
+# Observed 2026-07-26 (proxmox.tyrell.com.au): a consumer SATA SSD with a
+# pending ECC sector retried without bound; its pool wedged (one txg took 769
+# seconds), the shared zvol taskq threads blocked behind it, and VMs backed by
+# an unrelated pool lost their I/O entirely. Host /proc/pressure/io full hit 83%.
+#
+# Fix: scale threads with the machine, and partition zvols across several
+# independent taskqs so a blocked device can only exhaust its own share.
+NPROC=$(nproc)
+ZVOL_THREADS=$NPROC
+[ "$ZVOL_THREADS" -lt 16 ] && ZVOL_THREADS=16
+ZVOL_NUM_TASKQS=$((NPROC / 4))
+[ "$ZVOL_NUM_TASKQS" -lt 2 ] && ZVOL_NUM_TASKQS=2
+[ "$ZVOL_NUM_TASKQS" -gt 8 ] && ZVOL_NUM_TASKQS=8
+
+echo "zvol taskqs: ${ZVOL_NUM_TASKQS} x ${ZVOL_THREADS} threads (${NPROC} CPUs)"
+
+#############################################
 # Make ARC settings persistent
 #############################################
 cat > /etc/modprobe.d/zfs.conf << EOF
@@ -135,9 +159,19 @@ options zfs zfs_arc_min=$ARC_MIN
 options zfs zfs_arc_max=$ARC_MAX
 
 # Performance settings (no data loss risk)
-options zfs zfs_arc_meta_limit_percent=75
 options zfs zfs_compressed_arc_enabled=1
-options zfs zvol_threads=8
+
+# zvol taskq: sized from CPU count and partitioned, so a single wedged device
+# cannot starve zvols belonging to other pools. NEVER hardcode this low.
+options zfs zvol_threads=$ZVOL_THREADS
+options zfs zvol_num_taskqs=$ZVOL_NUM_TASKQS
+
+# NOTE: zfs_arc_meta_limit_percent was REMOVED in OpenZFS 2.2 (superseded by
+# zfs_arc_meta_balance, which is a different concept -- an eviction balance,
+# not a cap). Setting it on 2.2+ is silently ignored:
+#   zfs: unknown parameter 'zfs_arc_meta_limit_percent' ignored
+# Left unset rather than guessing an equivalent, so the config does not claim
+# to limit something it is not limiting.
 
 # Keep Proxmox defaults for sync behavior
 # sync=standard is maintained for data safety
@@ -311,21 +345,21 @@ echo "  OK Atime disabled on data datasets"
 echo "  OK Extended attributes optimized"
 echo ""
 echo "Proxmox-managed settings (change via GUI):"
-echo "  • Compression (per-volume)"
-echo "  • Thin provisioning (sparse)"
-echo "  • Volblocksize (at creation)"
-echo "  • Cache settings"
+echo "  - Compression (per-volume)"
+echo "  - Thin provisioning (sparse)"
+echo "  - Volblocksize (at creation)"
+echo "  - Cache settings"
 echo ""
 echo "Settings kept at defaults for safety:"
-echo "  • sync=standard (prevents data loss)"
-echo "  • primarycache=all (better performance)"
-echo "  • logbias=latency (better for mixed workloads)"
-echo "  • recordsize=128k (default is optimal)"
+echo "  - sync=standard (prevents data loss)"
+echo "  - primarycache=all (better performance)"
+echo "  - logbias=latency (better for mixed workloads)"
+echo "  - recordsize=128k (default is optimal)"
 echo ""
 echo "To improve performance further (with UPS only):"
-echo "  • Add SLOG device (ZIL on fast SSD)"
-echo "  • Add L2ARC device (cache on SSD)"
-echo "  • Consider special vdev for metadata"
+echo "  - Add SLOG device (ZIL on fast SSD)"
+echo "  - Add L2ARC device (cache on SSD)"
+echo "  - Consider special vdev for metadata"
 echo ""
 echo "Monitor performance:"
 echo "  zpool iostat -v 2"
@@ -340,32 +374,32 @@ chmod +x /usr/local/bin/zfs-tune-guide
 echo -e "\n${GREEN}=== ZFS Configuration Complete ===${NC}"
 echo ""
 echo "Applied Settings:"
-echo "  • ARC Memory:  ${ARC_MIN_GB}-${ARC_MAX_GB}GB (leaves $((TOTAL_RAM_GB - ARC_MAX_GB))GB for VMs)"
-echo "  • Autotrim:    Enabled (SSD optimization)"
-echo "  • Atime:       Disabled (reduces writes)"
-echo "  • Xattr:       Optimized (sa mode)"
+echo "  - ARC Memory:  ${ARC_MIN_GB}-${ARC_MAX_GB}GB (leaves $((TOTAL_RAM_GB - ARC_MAX_GB))GB for VMs)"
+echo "  - Autotrim:    Enabled (SSD optimization)"
+echo "  - Atime:       Disabled (reduces writes)"
+echo "  - Xattr:       Optimized (sa mode)"
 echo ""
 echo "Preserved for Safety:"
-echo "  • Sync:        Standard (data integrity)"
-echo "  • Compression: Per-volume (Proxmox managed)"
-echo "  • Cache:       Default (all data + metadata)"
+echo "  - Sync:        Standard (data integrity)"
+echo "  - Compression: Per-volume (Proxmox managed)"
+echo "  - Cache:       Default (all data + metadata)"
 echo ""
 echo "Commands Available:"
-echo -e "  • ${CYAN}zfs-status${NC}      - Check current status"
-echo -e "  • ${CYAN}zfs-tune-guide${NC}  - Tuning recommendations"
-echo -e "  • ${CYAN}arc_summary${NC}     - Detailed ARC statistics"
+echo -e "  - ${CYAN}zfs-status${NC}      - Check current status"
+echo -e "  - ${CYAN}zfs-tune-guide${NC}  - Tuning recommendations"
+echo -e "  - ${CYAN}arc_summary${NC}     - Detailed ARC statistics"
 echo ""
 
 # Show current status
 CURRENT_ARC=$(awk '/^size/ {print $3}' /proc/spl/kstat/zfs/arcstats)
 echo "Current Status:"
-echo "  • ARC using: $((CURRENT_ARC / 1024 / 1024 / 1024))GB of ${ARC_MAX_GB}GB max"
+echo "  - ARC using: $((CURRENT_ARC / 1024 / 1024 / 1024))GB of ${ARC_MAX_GB}GB max"
 
 # Check if trim is running
 if zpool status | grep -q "trimming"; then
-    echo "  • TRIM: Currently running"
+    echo "  - TRIM: Currently running"
 else
-    echo "  • TRIM: Idle (runs automatically)"
+    echo "  - TRIM: Idle (runs automatically)"
 fi
 
 echo ""

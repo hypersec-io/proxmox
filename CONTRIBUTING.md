@@ -246,25 +246,54 @@ NC='\033[0m'
 1. **Static Analysis**
    ```bash
    # Run ShellCheck
-   shellcheck -x *.sh
+   shellcheck -x postinstall/*.sh tests/*.sh
 
    # Check for common issues
-   grep -n "TODO\|FIXME\|XXX" *.sh
+   grep -n "TODO\|FIXME\|XXX" postinstall/*.sh
    ```
 
-2. **Manual Testing**
+2. **Automated Tests**
+
+   These need no Proxmox, no root and no network. Run them before anything
+   else -- they are fast and they catch the class of bug that is otherwise
+   only visible in production:
+
+   ```bash
+   ./tests/test-update-policy.sh   # the n-0.1 rule, version arithmetic
+   ./tests/test-apt-pinning.sh     # apt behaviour against a throwaway repo
+   ./tests/test-disk-errors.sh     # pool redundancy + SCT ERC detection
+   ./tests/test-cleanup.sh         # superseded-artefact classification
+   ./tests/test-ui-override.sh     # generated JavaScript parses, edits are exact
+   ```
+
+   Scripts under test are **sourceable**: sourcing defines their functions and
+   returns before executing anything, so decision logic can be driven directly.
+   Keep that property -- put the root check with execution, not at the top of
+   the file, or the tests stop working unprivileged.
+
+   When adding logic that decides something (a version, a device, a file
+   classification), split the decision out as a pure function and test it.
+   Asserting on generated text is not enough: the update-policy bug this suite
+   exists for produced a preferences file that looked correct and pinned almost
+   nothing. Only asking apt caught it.
+
+3. **Manual Testing**
    - Test on fresh Proxmox VE 9.x installation
    - Run script at least twice (verify idempotency)
    - Test with Intel AND AMD systems (if applicable)
    - Verify all created commands work
    - Check backup files are created
 
-3. **Verification Checklist**
+   For anything needing a real PVE install, see [tests/nested-pve.md](tests/nested-pve.md).
+
+4. **Verification Checklist**
+   - [ ] Automated tests pass
    - [ ] Script runs without errors
    - [ ] Idempotent (safe to run multiple times)
    - [ ] Backups created in correct location
    - [ ] Status messages are clear and helpful
    - [ ] Error handling works correctly
+   - [ ] Nothing can silently do nothing -- a no-op path reports itself
    - [ ] All created commands are functional
    - [ ] Documentation is accurate
    - [ ] No hardcoded paths (use variables)

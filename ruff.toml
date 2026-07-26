@@ -1,0 +1,31 @@
+# Ruff configuration for the Python post-install scripts.
+#
+# The rule set is declared explicitly rather than left to ruff's defaults, so a
+# ruff upgrade cannot turn CI red without a deliberate change here.
+
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes -- unused names, undefined names
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+]
+
+ignore = [
+    # Backup filenames are stamped in LOCAL time on purpose: they are read by a
+    # human looking at a host in that host's timezone, not correlated across
+    # regions. Forcing UTC here would make them harder to match to a change
+    # window, for no benefit.
+    "DTZ005",
+]
+
+[lint.per-file-ignores]
+# These scripts are standalone system tools run as root, not a library. They
+# print and exit rather than raising, so a broad except around an optional
+# enrichment step is the correct behaviour, not a latent bug.
+"postinstall/proxmox-netbird.py" = ["BLE001"]
+"postinstall/proxmox-ssm.py" = ["BLE001"]

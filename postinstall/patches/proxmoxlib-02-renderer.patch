@@ -1,5 +1,0 @@
---- a/proxmoxlib.js
-+++ b/proxmoxlib.js
-@@ -1 +1 @@
--                    if (components[0].match(/\w+(-no-subscription|test)\s*$/i)) {
-+                    if (components[0].match(/\w+(-no-subscription|test)\s*$/i) && !(Proxmox.Utils.conservativePolicyActive && components[0].match(/no-subscription/))) {

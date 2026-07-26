@@ -111,6 +111,10 @@ TOOLS=(
     "lm-sensors"
     "smartmontools"
     "ethtool"
+    # Hard dependency of proxmox-update-policy.sh's UI customisation, and NOT
+    # present on a Debian cloud image or minimal PVE install. Without it every
+    # UI patch fails silently and the subscription warnings stay.
+    "patch"
 )
 
 echo "Checking installed tools..."
@@ -194,6 +198,15 @@ echo -e "\n${YELLOW}[4/7] Configuring kernel parameters...${NC}"
 
 cat > /etc/sysctl.d/98-proxmox-optimize.conf << 'EOF'
 # Proxmox VM/Container Configuration
+#
+# Numbered 98- deliberately. proxmox-network.sh writes 99-proxmox-network-<tier>
+# and is MEANT to win where the two overlap (buffers, backlogs, keepalives):
+# the tier file is sized for the actual NIC, these are safe baselines for a
+# host that never ran the network script.
+#
+# Nothing here may be a read-only kernel statistic. Keys such as
+# kernel.random.entropy_avail are reported BY the kernel, not set on it, and
+# writing one produces "Operation not permitted" on every single boot.
 
 # Memory Management
 vm.swappiness=10
@@ -211,11 +224,28 @@ net.ipv4.tcp_tw_reuse=1
 # File System
 fs.file-max=2097152
 fs.inotify.max_user_watches=524288
+EOF
 
-# Bridge settings for VMs (Proxmox requirement)
+# Bridge netfilter: NOT a Proxmox requirement, despite being widely repeated as
+# one. Setting it forces every frame crossing a guest bridge through the host's
+# iptables/nftables chains, which costs real throughput on bridged guest
+# traffic. It is only needed if bridge-level firewalling is actually in use.
+#
+# pve-firewall manages br_netfilter itself when enabled, so the correct default
+# is to leave it alone and only assert it where the firewall is running.
+if systemctl is-enabled pve-firewall.service >/dev/null 2>&1; then
+    modprobe br_netfilter 2>/dev/null || true
+    cat >> /etc/sysctl.d/98-proxmox-optimize.conf << 'EOF'
+
+# Bridge netfilter - pve-firewall is enabled on this host, so guest traffic is
+# expected to traverse the host firewall chains.
 net.bridge.bridge-nf-call-iptables=1
 net.bridge.bridge-nf-call-ip6tables=1
 EOF
+    echo -e "${CYAN}pve-firewall enabled - bridge netfilter asserted${NC}"
+else
+    echo -e "${CYAN}pve-firewall not enabled - leaving bridge netfilter at kernel default${NC}"
+fi
 
 sysctl -p /etc/sysctl.d/98-proxmox-optimize.conf >/dev/null 2>&1 || \
     echo -e "${YELLOW}Some sysctl settings could not be applied${NC}"
@@ -372,12 +402,12 @@ echo -e "${GREEN}OK Management scripts created${NC}"
 echo -e "\n${GREEN}=== Configuration Complete ===${NC}"
 echo ""
 echo "Applied:"
-echo "  • Monitoring tools installed"
-echo "  • Time synchronization configured (chrony)"
-echo "  • Kernel parameters configured"
-echo "  • Nested virtualization configured"
-echo "  • IOMMU ready"
-echo "  • Storage configured"
+echo "  - Monitoring tools installed"
+echo "  - Time synchronization configured (chrony)"
+echo "  - Kernel parameters configured"
+echo "  - Nested virtualization configured"
+echo "  - IOMMU ready"
+echo "  - Storage configured"
 echo ""
 echo "Commands:"
 echo "  proxmox-status - System status"

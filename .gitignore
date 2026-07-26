@@ -34,3 +34,10 @@ Thumbs.db
 .claude/
 CLAUDE.md
 STATE.md
+
+# AI working artefacts -- never committed
+.hyperi-ai/
+
+# Python bytecode
+__pycache__/
+*.pyc
